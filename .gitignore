@@ -1,0 +1,7 @@
+# Ignore Python cache directories
+__pycache__/
+*.py[cod]
+.vscode/
+
+# Ignore MNIST
+data/
