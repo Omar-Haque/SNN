@@ -86,7 +86,7 @@ class excitatory_neurons(nn.Module):
         # Only the highest voltage neuron is allowed to fire.
         # This is to overcome the problem of multiple neurons crossing the threshold together, since time proceeds in a discretized 1.0 ms manner.
         competing_v = self.v.clone()
-        competing_v[spikes == 0.0] = -1000.0 # Instantly disqualify non-spiking neurons
+        competing_v[spikes == 0.0] = -1000.0 # Disquality non-spiking neurons
         
         # Only the highest voltage strictly among the eligible spiking neurons is allowed to fire.
         max_v_indices: torch.Tensor = torch.argmax(competing_v, dim=1)

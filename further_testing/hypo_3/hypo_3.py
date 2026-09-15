@@ -1,0 +1,1 @@
+# Hypothesis 3: Before the spike, the network biases towards data points with the most number of points.

@@ -100,10 +100,10 @@ class excitatory_neurons(nn.Module):
         
         # Create a blank mask and put a 1.0 only at the winning index
         wta_mask = torch.zeros_like(spikes)
-        wta_mask.scatter_(1, max_v_indices.unsqueeze(1), 1.0)
+        wta_mask.scatter_(1, max_v_indices.unsqueeze(1), 1.0)    
         
         # Must have crossed the threshold and won the argmax wta.
-        spikes = spikes * wta_mask 
+        spikes = spikes * wta_mask
         
         # Reset the neurons which have spiked, back to E_rest voltage
         self.v[spikes == 1.0] = self.E_rest
@@ -278,14 +278,14 @@ def assign_neuron_labels(model: DiehlAndCookNetwork, data_loader: DataLoader, de
         for t in range(num_steps):
             out_spikes: torch.Tensor = model(spike_data[t], learning=False) # shape: [batch_size, num_neurons]
             batch_neuron_spikes += out_spikes
-            
+        
         # For each image in the batch, map the spikes to its target label
         for digit in range(10):
-            mask = (targets == digit)
+            mask = (targets == digit) # targets and masks have shape (batch_size,)
             if mask.any():
                 # Divide by the number of images in the mask to get the average
                 spike_counts[:, digit] += batch_neuron_spikes[mask].sum(dim=0) / mask.sum().float()
-                  
+
     # Find which digit caused each neuron to fire the most
     # neuron_assignments[i] will hold the integer digit (0-9) for the i-th neuron
     neuron_assignments: torch.Tensor = torch.argmax(spike_counts, dim=1)
@@ -339,7 +339,7 @@ def evaluate_network(model: DiehlAndCookNetwork, data_loader: DataLoader, neuron
     #             assigned_digit = neuron_assignments[neuron_idx].item()
     #             if assigned_digit != -1:
     #                 class_votes[assigned_digit] += batch_neuron_spikes[i, neuron_idx] # type: ignore
-                
+
     #         # The network's final guess is the class with the highest total spikes
     #         prediction = torch.argmax(class_votes).item()
             
@@ -390,10 +390,10 @@ def evaluate_network(model: DiehlAndCookNetwork, data_loader: DataLoader, neuron
         # The network's final guess is the class with the highest total spikes (evaluated across the whole batch)
         predictions: torch.Tensor = torch.argmax(class_votes, dim=1)
         
-        # Instantly count how many predictions match the targets
+        # Count how many predictions match the targets
         correct_predictions += (predictions == targets).sum().item()
         total_predictions += batch_size
-        
+    
     return (correct_predictions / total_predictions) * 100.0
     
 
@@ -464,19 +464,19 @@ for epoch in range(num_epochs):
         #     accuracy_history.append(snapshot_acc)
         #     print(snapshot_acc)
         
-        # if batch_idx % 100 == 0:
-        #     print(f"Epoch {epoch} | Batch {batch_idx}/{len(train_loader)} processed.")
+        if batch_idx % 100 == 0:
+            print(f"Epoch {epoch} | Batch {batch_idx}/{len(train_loader)} processed.")
 
 print("Training complete")
 
 # --- PLOT THE TRUE TRAINING CURVE ---
-plt.figure(figsize=(10, 6))
-plt.plot(points_history, accuracy_history, marker='o', linestyle='-', color='blue', linewidth=2)
-plt.title(f"True Training Accuracy Curve ({model.num_neurons} Neurons)")
-plt.xlabel("Number of Training Points Processed")
-plt.ylabel("Accuracy (%) on Validation Subset")
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.show()
+# plt.figure(figsize=(10, 6))
+# plt.plot(points_history, accuracy_history, marker='o', linestyle='-', color='blue', linewidth=2)
+# plt.title(f"True Training Accuracy Curve ({model.num_neurons} Neurons)")
+# plt.xlabel("Number of Training Points Processed")
+# plt.ylabel("Accuracy (%) on Validation Subset")
+# plt.grid(True, linestyle='--', alpha=0.7)
+# plt.show()
 
 visualize_learned_templates(model)
 neuron_labels = assign_neuron_labels(model, train_loader, device, num_steps)

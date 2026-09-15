@@ -4,10 +4,13 @@ from torch.utils.data import DataLoader
 from snntorch import spikegen
 import math
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+from matplotlib.lines import Line2D
 import numpy as np
-# type annotations everywhere because I remember messing up one of my RL projects because of confusing tensors and numpy arrays.
-from jaxtyping import Float, Int
+from pathlib import Path
 
+
+script_dir: Path = Path(__file__).parent
 # Import MNIST train and test
 train_dataset: datasets.MNIST = datasets.MNIST(
     root='./data',
@@ -76,29 +79,54 @@ class excitatory_neurons(nn.Module):
         self.g_e   = torch.zeros(batch_size, self.num_neurons, device=device)
         self.g_i   = torch.zeros(batch_size, self.num_neurons, device=device)
         self.theta = self.theta.to(device) # type: ignore
+        # NEW: 5 ms refractory period for excitatory neurons.
+        # self.refractory_timer: torch.Tensor = torch.zeros((batch_size, self.num_neurons), device=self.v.device) # type: ignore
 
     def forward(self, x_exc: torch.Tensor, x_inh: torch.Tensor, learning: bool = True) -> torch.Tensor:
-        # TODO: This method has been modified to replicate BindsNET's forward method for excitatory neurons.
-        
         if self.v is None or self.theta is None:
             raise RuntimeError("Call reset() before running the forward pass.")
+        
+        # NEW: refractory countdown
+        # self.refractory_timer = torch.clamp(self.refractory_timer - 1.0, min=0.0)
+        # is_refractory = (self.refractory_timer > 0.0)
+        
         self.v = self.decay * (self.v - self.E_rest) + self.E_rest
         
         if learning:
             self.theta = self.theta_base + (self.theta - self.theta_base) * self.theta_decay
         self.v += x_exc - x_inh
         
+        # NEW: Bring refractory neurons back to baseline voltage.
+        # self.v[is_refractory] = self.E_rest
+        
         # save a copy of the voltage to plot a voltage and theta vs timesteps plot for neurons
         self.raw_v: torch.Tensor = self.v.clone()
         
         spikes: torch.Tensor = (self.v >= self.theta).float()
+        # spikes[is_refractory] = 0.0  # NEW: Cannot spike during refractory period
         
+        # WTA
+        competing_v = self.v.clone()
+        competing_v[spikes == 0.0] = -float("inf")
+        max_v_indices: torch.Tensor = torch.argmax(competing_v, dim=1)
+        wta_mask = torch.zeros_like(spikes)
+        wta_mask.scatter_(1, max_v_indices.unsqueeze(1), 1.0)
+        spikes = spikes * wta_mask
+        
+        # ones = spikes.sum(dim=1)
+        # morethanone = (ones > 1).any().item()
+        # if (morethanone):
+        #     print("MORE THAN 1 NEURON SPIKED ON A SINGLE TIMESTEP")
+        
+        # NEW: Add spiked neurons into a refractory period
+        # newly_spiked: torch.Tensor = (spikes == 1.0)
+        # self.refractory_timer[newly_spiked] = 5.0
         self.v[spikes == 1.0] = self.E_rest
         
         if learning:
             # CURRENT: Changed .mean to .sum
             self.theta += (spikes.sum(dim=0) * self.theta_plus) / 16
-            self.theta.clamp_(max=0.0)
+            # self.theta.clamp_(max=0.0)
 
         return spikes
 
@@ -115,8 +143,8 @@ class DiehlAndCookNetwork(nn.Module):
         
         # STDP parameters
         self.w_max:    float = 1.0  # weight upper limit
-        self.lr_plus:  float = 1e-2 # CURRENT: lr_plus changed from 0.0003 to 0.01       # Learning rate for potentiation 0.01
-        self.lr_minus: float = 1e-4 # CURRENT: lr_plus changed from 0.000003 to 0.0001   # Learning rate for depression 0.0001
+        self.lr_plus:  float = 1e-2 # Learning rate for potentiation 0.01
+        self.lr_minus: float = 1e-4 # Learning rate for depression 0.0001
         
         # Trace decay multipliers
         self.decay_x: float = math.exp(-1.0 / 20.0) # Pre-synaptic trace decay
@@ -131,8 +159,7 @@ class DiehlAndCookNetwork(nn.Module):
         self.neurons: excitatory_neurons = excitatory_neurons()
         
         # LATERAL INHIBITION USING A 100 x 100 MATRIX
-        # A penalty of 120mV
-        # CURRENT: Changed penalty from 120mV to 200mV.w
+        # A penalty of 200mV
         self.inh_matrix: torch.Tensor = torch.ones(self.num_neurons, self.num_neurons) * 200.0
         # A neuron doesn't inhibit itself
         self.inh_matrix.fill_diagonal_(0.0)
@@ -196,7 +223,7 @@ class DiehlAndCookNetwork(nn.Module):
         # 1.0 indicates neuron j successfully fired at millisecond t (see training and assignment loop) while looking at image i.
         # 0.0 indicates neuron j did not fire when looking at image i.
     
-def visualize_learned_templates(model: DiehlAndCookNetwork, first: int) -> None:
+def visualize_learned_templates(model: DiehlAndCookNetwork) -> None:
     print("Extracting weights and thresholds after training...")
     
     # Shape is (400, 784)
@@ -211,7 +238,7 @@ def visualize_learned_templates(model: DiehlAndCookNetwork, first: int) -> None:
     # Set up a 20x20 grid for matplotlib
     # Increased figsize and hspace to make room for the text titles
     fig, axes = plt.subplots(20, 20, figsize=(18, 18))
-    fig.suptitle(f"Unsupervised STDP Templates & Thresholds ({model.num_neurons} Neurons)", fontsize=20, y=0.95)
+    fig.suptitle(f"Synaptic Weights Visualization for ({model.num_neurons} Neurons)", fontsize=20, y=0.95)
     plt.subplots_adjust(wspace=0.05, hspace=0.4) 
     
     # Loop through all neurons and plot their weight image and theta value
@@ -225,12 +252,7 @@ def visualize_learned_templates(model: DiehlAndCookNetwork, first: int) -> None:
         # Hide the x and y axis ticks
         ax.set_xticks([])
         ax.set_yticks([])
-    if first == 0:
-        plt.savefig("theta_before.png")
-    elif first == 1:
-        plt.savefig("theta_after.png")
-    elif first == 2:
-        plt.savefig("theta_end.png")
+    plt.savefig(script_dir / f"theta_templates.png")
     plt.show()
 
 def visualize_confusion_matrix(conf_matrix: np.ndarray, step: int) -> None:
@@ -269,9 +291,9 @@ def assign_neuron_labels(model: DiehlAndCookNetwork, data_loader: DataLoader, de
         data, targets = data.to(device), targets.to(device)
         
         # Find the total sum of white pixels for each image in the batch
-        image_sums = data.sum(dim=(1, 2, 3), keepdim=True) + 1e-5
+        # image_sums = data.sum(dim=(1, 2, 3), keepdim=True) + 1e-5
         # Force every image to have the exact same total sum of 75.0
-        data = (data / image_sums) * 75.0
+        # data = (data / image_sums) * 75.0
         
         # Generate the 350ms presentation spikes
         spike_data: torch.Tensor = spikegen.rate(data * 0.1, num_steps=num_steps) # type: ignore
@@ -316,7 +338,7 @@ def assign_neuron_labels(model: DiehlAndCookNetwork, data_loader: DataLoader, de
 def evaluate_network(model: DiehlAndCookNetwork, data_loader: DataLoader, neuron_assignments: torch.Tensor, device: torch.device, num_steps: int, return_matrix: bool = False) -> float | tuple[float, np.ndarray]:
     print("Evaluating network accuracy on test set...")
     model.eval()
-    
+
     correct_predictions: int = 0
     total_predictions:   int = 0
     
@@ -374,158 +396,175 @@ def evaluate_network(model: DiehlAndCookNetwork, data_loader: DataLoader, neuron
         return accuracy, conf_matrix.cpu().numpy() # type: ignore
     return accuracy
 
-
-
-if torch.backends.mps.is_available():
-    device: torch.device = torch.device("mps")
-    print("Using MPS.")
-elif torch.cuda.is_available():
-    device: torch.device = torch.device("cuda")
-    print("Using CUDA.")
-else:
-    device: torch.device = torch.device("cpu")
-    print("Using CPU.")
-
-model: DiehlAndCookNetwork = DiehlAndCookNetwork().to(device)
-
-num_epochs: int = 4
-num_steps: int = 350
-
-model.train() # This probably doesn't make a difference.
-
-# Tracking variables for running accuracy
-total_points_processed = 0
-points_history = []
-accuracy_history = []
-snapshot_interval = 10 # Run an evaluation every n batches
-
-# Tracking variables for voltage/theta vs timesteps plot
-dominant_idx = None
-track_steps = []
-track_theta = []
-track_vmax = []
-
-# Training loop
-for epoch in range(num_epochs):
-    data: Float[torch.Tensor, "batch channels height width"]
-    targets: Int[torch.Tensor, "batch"]
+def train(
+    model: DiehlAndCookNetwork,
+    train_loader: DataLoader,
+    snapshot_assign_loader: DataLoader,
+    snapshot_eval_loader: DataLoader,
+    test_loader: DataLoader,
+    device: torch.device,
+    num_epochs: int = 3,
+    num_steps: int = 350,
+    track_accuracy_curve: bool = False,
+    track_dominant_neuron: bool = True,
+    generate_confusion_matrix: bool = False,
+    visualize_templates: bool = False
+) -> DiehlAndCookNetwork:
     
-    for batch_idx, (data, targets) in enumerate(train_loader):
-        batch_size: int = data.shape[0]
-        data, targets = data.to(device), targets.to(device)
-        
-        # Find the total sum of white pixels for each image in the batch
-        image_sums = data.sum(dim=(1, 2, 3), keepdim=True) + 1e-5
-        # Force every image to have the exact same total sum of 75.0
-        data = (data / image_sums) * 75.0
-        
-        # Generate poisson spike trains
-        spike_data: torch.Tensor = spikegen.rate(data * 0.1, num_steps=num_steps) # type: ignore
-        # Flatten spatial dimensions: shape becomes [num_steps, batch_size, 784]
-        spike_data = spike_data.view(num_steps, batch_size, 784)
-        
-        # Reset the network memory for a new batch
-        model.reset(batch_size, device)
-        
-        # Identify the greediest neuron after 5,000 samples
-        if dominant_idx is None and total_points_processed > 5000:
-            dominant_idx = torch.argmax(model.neurons.theta).item() # type: ignore
-            print(f"\n Tracking dominant neuron #{dominant_idx}")
-        
-        # Track the highest voltage it reaches in this batch.
-        highest_v_in_batch = -1000.0
-        
-        # Simulate num_steps milliseconds of biological time
-        for t in range(num_steps):
-            # Extract the spikes for this specific millisecond: shape [batch_size, 784]
-            current_input_spikes: torch.Tensor = spike_data[t]
+    # Tracking variables for running accuracy
+    total_points_processed = 0
+    points_history = []
+    accuracy_history = []
+    snapshot_interval = 100
+
+    # Tracking variables for voltage/theta vs timesteps plot
+    dominant_idx = None
+    track_steps = []
+    track_theta = []
+    track_vmax = []
+    track_spiked = []
+
+    for epoch in range(num_epochs):
+        for batch_idx, (data, targets) in enumerate(train_loader):
+            batch_size: int = data.shape[0]
+            data, targets = data.to(device), targets.to(device)
             
-            # Forward pass with those extracted spikes.
-            out_spikes: torch.Tensor = model(current_input_spikes)
+            # Find the total sum of white pixels for each image in the batch
+            # image_sums = data.sum(dim=(1, 2, 3), keepdim=True) + 1e-5
+            # Force every image to have the exact same total sum of 75.0
+            # data = (data / image_sums) * 75.0
             
-            # If we have our target, retrieve its raw voltage
-            if dominant_idx is not None:
-                # Get the target neuron's voltage across all 32 images in the batch
-                current_v = model.neurons.raw_v[:, dominant_idx] # type: ignore
+            # Generate poisson spike trains.
+            spike_data: torch.Tensor = spikegen.rate(data * 0.1, num_steps=num_steps) # type: ignore
+            # Flatten spatial dimensions: shape becomes [num_steps, batch_size, 784]
+            spike_data = spike_data.view(num_steps, batch_size, 784)
+
+            # Reset the network memory for a new batch
+            model.reset(batch_size, device)
+            
+            # Identify the greediest neuron after 5,000 samples
+            if track_dominant_neuron and dominant_idx is None and total_points_processed > 5000:
+                dominant_idx = torch.argmin(model.neurons.theta).item() # type: ignore
+                print(f"\n Tracking passive neuron #{dominant_idx}")
+            
+            # Track the highest voltage it reaches in this batch.
+            highest_v_in_batch: float = -1000.0
+            dominant_spiked_in_batch: bool = False
+            
+            # Simulate num_steps milliseconds of biological time
+            for t in range(num_steps):
+                # Forward pass with those extracted spikes.
+                out_spikes: torch.Tensor = model(spike_data[t])
                 
-                # Update the highest voltage seen so far
-                highest_v_in_batch = max(highest_v_in_batch, current_v.max().item())
+                # If we have our target, retrieve its raw voltage
+                if track_dominant_neuron and dominant_idx is not None:
+                    # Get the target neuron's voltage across all 32 images in the batch
+                    current_v = model.neurons.raw_v[:, dominant_idx] # type: ignore
+                    # Update the highest voltage seen so far
+                    highest_v_in_batch = max(highest_v_in_batch, current_v.max().item())
+                    if out_spikes[:, dominant_idx].sum().item() > 0: # type: ignore
+                        dominant_spiked_in_batch = True
+            
+            total_points_processed += batch_size
+            
+            # Log the data for our graph every batch
+            if track_dominant_neuron and dominant_idx is not None:
+                track_steps.append(total_points_processed)
+                track_vmax.append(highest_v_in_batch)
+                track_theta.append(model.neurons.theta[dominant_idx].item()) # type: ignore
+                track_spiked.append(dominant_spiked_in_batch)
+            
+            # Estimated accuracy evaluation
+            if track_accuracy_curve and batch_idx % snapshot_interval == 0:
+                print(f"Epoch {epoch+1} | Batch {batch_idx}/{len(train_loader)} | Estimating current accuracy...")
+                temp_labels = assign_neuron_labels(model, snapshot_assign_loader, device, num_steps)
+                snapshot_acc = evaluate_network(model, snapshot_eval_loader, temp_labels, device, num_steps, return_matrix=False)
+                print(snapshot_acc)
+                points_history.append(total_points_processed)
+                accuracy_history.append(snapshot_acc)
         
-        total_points_processed += batch_size
-        
-        # Log the data for our graph every batch
-        if dominant_idx is not None:
-            track_steps.append(total_points_processed)
-            track_vmax.append(highest_v_in_batch)
-            track_theta.append(model.neurons.theta[dominant_idx].item()) # type: ignore
-        
-        # Between 120k and 160k, the only major difference is that the unassigned neurons get assigned.
-        # It is reasonable to assume that, around this range, the thresholds for dominant neurons reach a value too
-        # high to activate, because of which the unassigned neurons have a chance to learn digits.
-        if (total_points_processed == 120000):
-            visualize_learned_templates(model, 0)
-        if (total_points_processed == 160000):
-            visualize_learned_templates(model, 1)
+            if batch_idx % 100 == 0:
+                print(f"Epoch {epoch+1} | Batch {batch_idx}/{len(train_loader)} processed.")
+    print("Training complete")
 
-        # # Confusion matrix
-        # if total_points_processed in [120000, 160000]:
-        #     print(f"\n---> REACHED {total_points_processed} POINTS: Generating Confusion Matrix...")
-        #     temp_labels = assign_neuron_labels(model, snapshot_assign_loader, device, num_steps)
-        #     snapshot_acc, c_matrix = evaluate_network(model, snapshot_eval_loader, temp_labels, device, num_steps, return_matrix=True) # type: ignore
-        #     visualize_confusion_matrix(c_matrix, total_points_processed)
-        #     print(f"   -> Accuracy at Matrix: {snapshot_acc:.2f}%\n")
+    # Plot accuracy curve
+    if track_accuracy_curve and len(points_history) > 0:
+        plt.figure(figsize=(10, 6))
+        plt.plot(points_history, accuracy_history, linestyle='-', color='blue', linewidth=2)
+        plt.title(f"Accuracy Curve ({model.num_neurons} Neurons)")
+        plt.xlabel("Number of Training Points Processed")
+        plt.ylabel("Accuracy (%) on Validation Subset")
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.savefig(script_dir / f"accuracy-time.png")
+        plt.show()
 
-        # # Estimated accuracy evaluation
-        # elif batch_idx % snapshot_interval == 0:
-        #     # print(f"Epoch {epoch+1} | Batch {batch_idx}/{len(train_loader)} | Estimating current accuracy...")
-        #     temp_labels = assign_neuron_labels(model, snapshot_assign_loader, device, num_steps)
-        #     snapshot_acc = evaluate_network(model, snapshot_eval_loader, temp_labels, device, num_steps, return_matrix=False)
-        #     print(snapshot_acc)
-        #     points_history.append(total_points_processed)
-        #     accuracy_history.append(snapshot_acc)
+    # Plot the neuron voltage-theta/time graph
+    if track_dominant_neuron and dominant_idx is not None and len(track_steps) > 1:
+        print(f"Plotting voltage plot for passive neuron #{dominant_idx}...")
+        plt.figure(figsize=(12, 6))
+        plt.plot(track_steps, track_vmax, color='blue', label='Max Voltage ($V_{max}$)', linewidth=2)
+        points = np.array([track_steps, track_theta]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        segment_colors = ['red' if spiked else 'green' for spiked in track_spiked[1:]]
+        lc = LineCollection(segments, colors=segment_colors, linewidth=2) # type: ignore
+        plt.gca().add_collection(lc)
 
-        if batch_idx % 100 == 0:
-            print(f"Epoch {epoch+1} | Batch {batch_idx}/{len(train_loader)} processed.")
+        plt.title(f"Passive Neuron #{dominant_idx} Voltage-Theta/Time Graph", fontsize=16)
+        plt.xlabel("Number of Training Points Processed", fontsize=12)
+        plt.ylabel("Voltage (mV)", fontsize=12)
+        plt.axvspan(115000, 130000, color='gray', alpha=0.2, label='Observed Accuracy Spike Window')
 
-print("Training complete")
-
-# --- PLOT THE TRUE TRAINING CURVE ---
-plt.figure(figsize=(10, 6))
-plt.plot(points_history, accuracy_history, marker='o', linestyle='-', color='blue', linewidth=2)
-plt.title(f"True Training Accuracy Curve ({model.num_neurons} Neurons)")
-plt.xlabel("Number of Training Points Processed")
-plt.ylabel("Accuracy (%) on Validation Subset")
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.show()
-
-# --- PLOT THE INTERSECTION AUTOPSY ---
-if dominant_idx is not None:
-    print(f"Generating intersection plot for Dominant Neuron #{dominant_idx}...")
+        legend_elements = [
+            Line2D([0], [0], color='blue', lw=2, label='Max Voltage ($V_{max}$)'),
+            Line2D([0], [0], color='red', lw=2, label='Threshold ($\ttheta$) - Spiking'),
+            Line2D([0], [0], color='green', lw=2, label='Threshold ($\ttheta$) - Not Spiking'),
+            plt.Rectangle((0, 0), 1, 1, fc='gray', alpha=0.2, label='Observed Accuracy Spike Window') # type: ignore
+        ]
+        plt.legend(handles=legend_elements, fontsize=12, loc='lower right')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(script_dir / f"neuron_{dominant_idx}_intersection.png", dpi=300)
+        plt.show()
     
-    plt.figure(figsize=(12, 6))
-
-    # Plot the maximum voltage and the threshold
-    plt.plot(track_steps, track_vmax, color='blue', label='Max Voltage ($V_{max}$)', linewidth=2)
-    plt.plot(track_steps, track_theta, color='red', label='Threshold ($\\theta$)', linewidth=2)
-
-    # Formatting the graph
-    plt.title(f"Autopsy of Dominant Neuron #{dominant_idx}: The Tipping Point", fontsize=16)
-    plt.xlabel("Number of Training Points Processed", fontsize=12)
-    plt.ylabel("Voltage (mV)", fontsize=12)
-
-    # Highlight the observed spike region (120k - 160k)
-    plt.axvspan(120000, 160000, color='gray', alpha=0.2, label='Observed Accuracy Spike Window')
-
-    # Add legends and grids
-    plt.legend(fontsize=12, loc='lower right')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
+    if generate_confusion_matrix:
+        temp_labels = assign_neuron_labels(model, snapshot_assign_loader, device, num_steps)
+        _, c_matrix = evaluate_network(model, snapshot_eval_loader, temp_labels, device, num_steps, return_matrix=True) # type: ignore
+        visualize_confusion_matrix(c_matrix, total_points_processed)
     
-    # Save the figure automatically just in case you run this overnight
-    plt.savefig(f"neuron_{dominant_idx}_intersection.png", dpi=300)
-    plt.show()
+    if visualize_templates:
+        visualize_learned_templates(model)
+        
+    neuron_labels = assign_neuron_labels(model, train_loader, device, num_steps)
+    test_accuracy = evaluate_network(model, test_loader, neuron_labels, device, num_steps)
+    print(f"Final test set accuracy: {test_accuracy}%")
+    
+    return model
 
-visualize_learned_templates(model, 2)
-neuron_labels = assign_neuron_labels(model, train_loader, device, num_steps)
-test_accuracy = evaluate_network(model, test_loader, neuron_labels, device, num_steps)
-print(test_accuracy)
+
+if __name__ == '__main__':
+    if torch.backends.mps.is_available():
+        device: torch.device = torch.device("mps")
+        print("Using MPS.")
+    elif torch.cuda.is_available():
+        device: torch.device = torch.device("cuda")
+        print("Using CUDA.")
+    else:
+        device: torch.device = torch.device("cpu")
+        print("Using CPU.")
+    
+    model: DiehlAndCookNetwork = DiehlAndCookNetwork().to(device)
+    model.train() # This probably doesn't make a difference.
+    train(
+        model=model,
+        train_loader=train_loader,
+        snapshot_assign_loader=snapshot_assign_loader,
+        snapshot_eval_loader=snapshot_eval_loader,
+        test_loader=test_loader,
+        device=device,
+        num_epochs=3,
+        num_steps=350,
+        track_accuracy_curve=True,
+        track_dominant_neuron=True,
+        generate_confusion_matrix=False,
+        visualize_templates=False
+    )
