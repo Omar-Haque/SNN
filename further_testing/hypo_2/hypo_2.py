@@ -313,7 +313,7 @@ ax1.tick_params(axis="y", labelcolor="blue")
 ax1.grid(True, linestyle='--', alpha=0.7)
 
 
-ax2 = ax1.twinx()  
+ax2 = ax1.twinx()
 ax2.set_ylabel("Cumulative Weights Changed per Timestep", color="green")
 ax2.plot(weights_changed_points_history, weights_changed_per_timestep_history, linestyle='-', color='green', alpha=0.5, linewidth=1, label="Weights Changed per Timestep")
 ax2.tick_params(axis="y", labelcolor="green")
