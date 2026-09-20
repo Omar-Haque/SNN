@@ -3,15 +3,21 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from snntorch import spikegen
 import math
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MultipleLocator
 import numpy as np
 from pathlib import Path
 import random
 
 
 script_dir: Path = Path(__file__).parent
+output_dir = script_dir / "with_wta"
+base_saved_models_dir = script_dir / "with_wta" / "saved_models"
+
 # Import MNIST train and test
 train_dataset: datasets.MNIST = datasets.MNIST(
     root='./data',
@@ -162,7 +168,7 @@ class DiehlAndCookNetwork(nn.Module):
         self.x_trace     = torch.zeros(batch_size, 784, device=device)
         self.y_trace     = torch.zeros(batch_size, self.num_neurons, device=device)
     
-    def forward(self, input_spikes: torch.Tensor, learning: bool = True) -> torch.Tensor:
+    def forward(self, input_spikes: torch.Tensor, learning: bool = True) -> tuple[torch.Tensor, torch.Tensor | None]:
         # input spikes shape: (batch_size, 784)
         # Calculate excitatory current
         x_exc: torch.Tensor = self.synapses(input_spikes)
@@ -173,6 +179,9 @@ class DiehlAndCookNetwork(nn.Module):
         
         # Advance time
         current_spikes: torch.Tensor = self.neurons(x_exc, x_inh, learning=learning)
+        
+        # Return the change in weight (for graphs later)
+        delta_w: torch.Tensor | None = None
         
         # STDP
         if learning:
@@ -188,16 +197,17 @@ class DiehlAndCookNetwork(nn.Module):
             # When input fired, look back at output trace (depression)
             pre_interaction = torch.matmul(self.y_trace.t(), input_spikes) / batch_size
             delta_w_minus = (self.lr_minus ) * pre_interaction * self.synapses.weight
+            delta_w = delta_w_plus - delta_w_minus
             
             # Apply changes to synapses
-            self.synapses.weight.add_(delta_w_plus - delta_w_minus) # delta_w = η(x_pre − x_tar)(w_max − w)^μ
+            self.synapses.weight.add_(delta_w) # delta_w = η(x_pre − x_tar)(w_max − w)^μ
             self.synapses.weight.clamp_(min=0.0, max=self.w_max)
             # BindsNET weight normalization
             weight_sum = self.synapses.weight.sum(dim=1, keepdim=True)
             self.synapses.weight.mul_(78.4 / weight_sum)
             
         self.prev_spikes = current_spikes
-        return current_spikes
+        return current_spikes, delta_w
         
         # current_spikes has shape (batch_size, num_neurons)
         # Row i represents the ith image in our batch
@@ -261,6 +271,23 @@ def visualize_confusion_matrix(conf_matrix: np.ndarray, step: int) -> None:
     plt.tight_layout()
     plt.show()
 
+def save_spike_activity_grid(spike_counts: torch.Tensor, start_step: int, end_step: int, run_idx: int) -> None:
+    grid_data = spike_counts.detach().cpu().numpy().reshape(20, 20)
+    
+    plt.figure(figsize=(7, 6))
+    im = plt.imshow(grid_data, cmap='Blues', interpolation='nearest')
+    plt.colorbar(im, label='Total Spikes in Window')
+    plt.title(f"Neuron Spike Activity ({start_step:,} - {end_step:,} Samples)\nRun {run_idx}", fontsize=12)
+    plt.xticks([])
+    plt.yticks([])
+    plt.tight_layout()
+    
+    # Save directory
+    grid_dir = output_dir / "spike_grids" / f"run_{run_idx}"
+    grid_dir.mkdir(parents=True, exist_ok=True)
+    plt.savefig(grid_dir / f"spike_grid_{end_step}.png", dpi=300)
+    plt.close()
+
 @torch.no_grad()
 def assign_neuron_labels(model: DiehlAndCookNetwork, data_loader: DataLoader, device: torch.device, num_steps: int) -> torch.Tensor:
     print("Assigning class labels to neurons")
@@ -284,7 +311,7 @@ def assign_neuron_labels(model: DiehlAndCookNetwork, data_loader: DataLoader, de
         
         # Run the time loop with learning disabled
         for t in range(num_steps):
-            out_spikes: torch.Tensor = model(spike_data[t], learning=False) # shape: [batch_size, num_neurons]
+            out_spikes, _ = model(spike_data[t], learning=False) # shape: [batch_size, num_neurons]
             batch_neuron_spikes += out_spikes
             
         # For each image in the batch, map the spikes to its target label
@@ -346,7 +373,7 @@ def evaluate_network(model: DiehlAndCookNetwork, data_loader: DataLoader, neuron
         batch_neuron_spikes: torch.Tensor = torch.zeros(batch_size, model.num_neurons, device=device)
         
         for t in range(num_steps):
-            out_spikes: torch.Tensor = model(spike_data[t], learning=False)
+            out_spikes, _ = model(spike_data[t], learning=False)
             batch_neuron_spikes += out_spikes
             
         # Classify all images in the batch
@@ -369,6 +396,7 @@ def evaluate_network(model: DiehlAndCookNetwork, data_loader: DataLoader, neuron
         return accuracy, conf_matrix.cpu().numpy() 
     return accuracy
 
+
 def train(
     model: DiehlAndCookNetwork,
     train_loader: DataLoader,
@@ -376,13 +404,14 @@ def train(
     snapshot_eval_loader: DataLoader,
     test_loader: DataLoader,
     device: torch.device,
+    run_idx: int,
     num_epochs: int = 3,
     num_steps: int = 350,
     track_accuracy_curve: bool = False,
     track_dominant_neuron: bool = True,
     generate_confusion_matrix: bool = False,
     visualize_templates: bool = False
-) -> tuple[DiehlAndCookNetwork, list, list, list, list, list]:
+) -> tuple[DiehlAndCookNetwork, list, list, list, list, list, list]:
     
     # Randomize
     run_seed = random.randint(0, 2**31 - 1)
@@ -409,8 +438,26 @@ def train(
     points_history_per_batch = []
     weights_changed_history = []
     
-    # Tracking variables for norm of weight changes / time
+    # Tracking variable for norm of weight changes / time
     frobenius_norm_history = []
+    
+    # Variables for saving models
+    batch_size: int = train_loader.batch_size
+    saved_steps_this_run = set()
+    save_steps = list(range(100000, 150001, 5000))
+    exact_save_steps = {
+        target: math.ceil(target / batch_size) * batch_size 
+        for target in save_steps
+    }
+    
+    # Tracking variable for first spike timestep per batch
+    first_spike_history = []
+    
+    # Tracking variables for 10k sample-window spiking activity grid
+    window_size: int = 10000
+    next_checkpoint: int = window_size
+    window_start_point: int = 0
+    current_window_spike_counts: torch.Tensor = torch.zeros(model.num_neurons, device=device)
 
     for epoch in range(num_epochs):
         for batch_idx, (data, targets) in enumerate(train_loader):
@@ -427,6 +474,9 @@ def train(
             
             batch_cumulative_weights_changed: float = 0
             batch_frobenius_sum: float = 0.0
+            batch_window_spikes = torch.zeros(model.num_neurons, device=device)
+            batch_cumulative_weights_changed_tensor = torch.tensor(0.0, device=device)
+            batch_frobenius_sum_tensor = torch.tensor(0.0, device=device)
             
             # Identify the greediest neuron after 5,000 samples
             if track_dominant_neuron and dominant_idx is None and total_points_processed > 5000:
@@ -436,17 +486,15 @@ def train(
             # Track the highest voltage it reaches in this batch.
             highest_v_in_batch: float = -1000.0
             dominant_spiked_in_batch: bool = False
+            first_spike_timestep = float('nan')
             
             # Simulate num_steps milliseconds of biological time
             for t in range(num_steps):
-                weights_before_step: torch.Tensor = model.synapses.weight.detach().clone()
-                # Forward pass with those extracted spikes.
-                out_spikes: torch.Tensor = model(spike_data[t])
-                weight_difference: torch.Tensor = torch.abs(model.synapses.weight - weights_before_step)
-                weights_changed_this_step: float = (weight_difference > 1e-6).sum().item()
-                step_norm = torch.linalg.norm(weight_difference, ord='fro').item()
-                batch_cumulative_weights_changed += weights_changed_this_step                
-                batch_frobenius_sum += step_norm
+                out_spikes, delta_w = model(spike_data[t])
+                batch_window_spikes += out_spikes.sum(dim=0)
+                if delta_w is not None:
+                    batch_cumulative_weights_changed_tensor += (torch.abs(delta_w) > 1e-6).sum().float()
+                    batch_frobenius_sum_tensor += torch.linalg.norm(delta_w, ord='fro')
                 
                 # If we have our target, retrieve its raw voltage
                 if track_dominant_neuron and dominant_idx is not None:
@@ -456,11 +504,33 @@ def train(
                     highest_v_in_batch = max(highest_v_in_batch, current_v.max().item())
                     if out_spikes[:, dominant_idx].sum().item() > 0: 
                         dominant_spiked_in_batch = True
+                
+                # Check if ANY neuron spiked in ANY of the 32 images.
+                if out_spikes.sum().item() > 0:
+                    if np.isnan(first_spike_timestep):
+                        first_spike_timestep = t
             
+            batch_cumulative_weights_changed = batch_cumulative_weights_changed_tensor.item()
+            batch_frobenius_sum = batch_frobenius_sum_tensor.item()
             total_points_processed += batch_size
             points_history_per_batch.append(total_points_processed)
             weights_changed_history.append(batch_cumulative_weights_changed)
             frobenius_norm_history.append(batch_frobenius_sum)
+            first_spike_history.append(first_spike_timestep)
+            current_window_spike_counts += batch_window_spikes
+            while total_points_processed >= next_checkpoint:
+                save_spike_activity_grid(spike_counts=current_window_spike_counts, start_step=window_start_point, end_step=next_checkpoint, run_idx=run_idx)
+                window_start_point = next_checkpoint
+                next_checkpoint += window_size
+                current_window_spike_counts = torch.zeros(model.num_neurons, device=device)
+            
+            for save_step, exact_step in exact_save_steps.items():
+                if total_points_processed >= exact_step and exact_step not in saved_steps_this_run:
+                    run_saved_dir = base_saved_models_dir / f"run{run_idx}"
+                    run_saved_dir.mkdir(parents=True, exist_ok=True)
+                    model_filename = run_saved_dir / f"{exact_step}.pt"
+                    torch.save(model.state_dict(), model_filename)
+                    saved_steps_this_run.add(exact_step)
             
             # Log the data for our graph every batch
             if track_dominant_neuron and dominant_idx is not None:
@@ -471,7 +541,7 @@ def train(
             
             # Estimated accuracy evaluation
             if track_accuracy_curve and batch_idx % snapshot_interval == 0:
-                print(f"Epoch {epoch+1} | Batch {batch_idx}/{len(train_loader)} | Estimating current accuracy...")
+                print(f"Run {run_idx+1}/{num_runs} | Epoch {epoch+1} | Batch {batch_idx}/{len(train_loader)} | Estimating current accuracy...")
                 temp_labels = assign_neuron_labels(model, snapshot_assign_loader, device, num_steps)
                 snapshot_acc = evaluate_network(model, snapshot_eval_loader, temp_labels, device, num_steps, return_matrix=False)
                 print(snapshot_acc)
@@ -481,18 +551,7 @@ def train(
             if batch_idx % 100 == 0:
                 print(f"Epoch {epoch+1} | Batch {batch_idx}/{len(train_loader)} processed.")
     print("Training complete")
-
-    # Plot accuracy curve
-    # if track_accuracy_curve and len(points_history_per_snapshot) > 0:
-    #     plt.figure(figsize=(10, 6))
-    #     plt.plot(points_history_per_snapshot, accuracy_history, linestyle='-', color='blue', linewidth=2)
-    #     plt.title(f"Accuracy Curve ({model.num_neurons} Neurons)")
-    #     plt.xlabel("Number of Training Points")
-    #     plt.ylabel("Accuracy (%) on Validation Subset")
-    #     plt.grid(True, linestyle='--', alpha=0.7)
-    #     plt.savefig(script_dir / f"accuracy-time.png")
-    #     plt.show()
-
+    
     # Plot the neuron voltage-theta/time graph
     if track_dominant_neuron and dominant_idx is not None and len(track_steps) > 1:
         print(f"Plotting voltage plot for passive neuron #{dominant_idx}...")
@@ -511,8 +570,8 @@ def train(
 
         legend_elements = [
             Line2D([0], [0], color='blue', lw=2, label='Max Voltage ($V_{max}$)'),
-            Line2D([0], [0], color='red', lw=2, label='Threshold ($\ttheta$) - Spiking'),
-            Line2D([0], [0], color='green', lw=2, label='Threshold ($\ttheta$) - Not Spiking'),
+            Line2D([0], [0], color='red', lw=2, label='Threshold - Spiking'),
+            Line2D([0], [0], color='green', lw=2, label='Threshold - Not Spiking'),
             plt.Rectangle((0, 0), 1, 1, fc='gray', alpha=0.2, label='Observed Accuracy Spike Window') 
         ]
         plt.legend(handles=legend_elements, fontsize=12, loc='lower right')
@@ -533,7 +592,7 @@ def train(
     # test_accuracy = evaluate_network(model, test_loader, neuron_labels, device, num_steps)
     # print(f"Final test set accuracy: {test_accuracy}%")
     
-    return model, points_history_per_snapshot, points_history_per_batch, accuracy_history, weights_changed_history, frobenius_norm_history
+    return model, points_history_per_snapshot, points_history_per_batch, accuracy_history, weights_changed_history, frobenius_norm_history, first_spike_history
 
 
 if __name__ == '__main__':
@@ -552,20 +611,21 @@ if __name__ == '__main__':
     all_accuracies = []
     all_weights_changed = []
     all_frobenius_norms = []
+    all_first_spikes = []
     points_per_snapshot = None
     points_per_batch = None
     
     for run_idx in range(num_runs):
         model: DiehlAndCookNetwork = DiehlAndCookNetwork().to(device)
         model.train() # This probably doesn't make a difference.
-        # return model, points_history_per_snapshot, points_history_per_batch. accuracy_history, weights_changed_history
-        model, points_history_per_snapshot, points_history_per_batch, accuracy_history, weights_changed_history, frobenius_norm_history = train(
+        model, points_history_per_snapshot, points_history_per_batch, accuracy_history, weights_changed_history, frobenius_norm_history, first_spike_history = train(
             model=model,
             train_loader=train_loader,
             snapshot_assign_loader=snapshot_assign_loader,
             snapshot_eval_loader=snapshot_eval_loader,
             test_loader=test_loader,
             device=device,
+            run_idx=run_idx,
             num_epochs=4,
             num_steps=350,
             track_accuracy_curve=True,
@@ -578,14 +638,15 @@ if __name__ == '__main__':
         all_accuracies.append(accuracy_history)
         all_weights_changed.append(weights_changed_history)
         all_frobenius_norms.append(frobenius_norm_history)
+        all_first_spikes.append(first_spike_history)
     
     # ------ ACCURACY/TIME CURVE --------
     acc_array = np.array(all_accuracies) # shape: (num_runs, num_snapshots)
     mean_acc = np.mean(acc_array, axis=0)
     std_acc = np.std(acc_array, axis=0)
-    plt.figure(figsize=(10, 6))
-    plt.plot(    points_per_snapshot, mean_acc, color='blue', label='Mean Accuracy', linewidth=2)
-    plt.fill_between(
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(points_per_snapshot, mean_acc, color='blue', label='Mean Accuracy', linewidth=2)
+    ax.fill_between(
         points_per_snapshot, 
         mean_acc - std_acc, 
         mean_acc + std_acc, 
@@ -593,14 +654,19 @@ if __name__ == '__main__':
         alpha=0.2, 
         label='± 1 Standard Deviation'
     )
-    plt.title(f"Accuracy/Time, {num_runs} Runs (WTA on)", fontsize=14)
+    # Configure major ticks every 50k, minor ticks every 5k
+    ax.xaxis.set_major_locator(MultipleLocator(50000))
+    ax.xaxis.set_minor_locator(MultipleLocator(5000))
+    # Enable grid for both major and minor ticks (minor gridlines kept subtle)
+    ax.grid(True, which='major', linestyle='--', alpha=0.7)
+    ax.grid(True, which='minor', linestyle=':', alpha=0.3)
+    plt.title(f"Accuracy / No. of Training Examples, {num_runs} Runs (WTA on)", fontsize=14)
     plt.xlabel("Number of Training Points", fontsize=12)
     plt.ylabel("Accuracy (%) on Validation Subset", fontsize=12)
     plt.legend(loc='lower right', fontsize=11)
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     # Save
-    output_dir = script_dir / "with_wta"
     output_dir.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_dir / "accuracy-time.png", dpi=300)
     # ------ ACCURACY/TIME CURVE END --------
@@ -623,7 +689,7 @@ if __name__ == '__main__':
     ax2.plot(points_per_batch, mean_wc, linestyle='-', color='green', alpha=0.6, linewidth=1, label="Mean Weights Changed")
     ax2.fill_between(points_per_batch, mean_wc - std_wc, mean_wc + std_wc, color='green', alpha=0.1, label="Weights Changed ± 1 STD")
     ax2.tick_params(axis="y", labelcolor="green")
-    plt.title(f"Accuracy-No. of Weights Changed/Time, {num_runs} Runs (WTA on)", fontsize=14)
+    plt.title(f"Accuracy-No. of Weights Changed / No. of Training Examples, {num_runs} Runs (WTA on)", fontsize=14)
     fig.tight_layout()
     plt.savefig(output_dir / "accuracy-weights_changed_per_batch-time.png", dpi=300)
     # ------ ACCURACY-NUMBER OF WEIGHTS CHANGED PER TIMESTEP / TIME END --------
@@ -646,7 +712,30 @@ if __name__ == '__main__':
     ax2.plot(points_per_batch, mean_fn, linestyle='-', color='purple', alpha=0.6, linewidth=1, label="Mean Frobenius Norm")
     ax2.fill_between(points_per_batch, mean_fn - std_fn, mean_fn + std_fn, color='purple', alpha=0.1, label="Frobenius Norm ± 1 STD")
     ax2.tick_params(axis="y", labelcolor="purple")
-    plt.title(f"Accuracy-Norm of Weight Changes/Time, {num_runs} Runs (WTA on)", fontsize=14)
+    plt.title(f"Accuracy-Norm of Weight Changes / No. of Training Examples, {num_runs} Runs (WTA on)", fontsize=14)
     fig.tight_layout()
     plt.savefig(output_dir / "accuracy-norm-time.png", dpi=300)
     # ------ ACCURACY-NORM OF WEIGHTS CHANGED PER TIMESTEP / TIME END --------
+    
+    # ------ ACCURACY-TIME OF FIRST SPIKE / TIME --------
+    fs_array = np.array(all_first_spikes) # shape: (num_runs, num_batches)
+    mean_fs = np.nanmean(fs_array, axis=0)
+    std_fs = np.nanstd(fs_array, axis=0)
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    # Primary Y-axis: Accuracy
+    ax1.set_xlabel("Number of Training Points", fontsize=12)
+    ax1.set_ylabel("Accuracy (%) on Validation Subset", color="blue", fontsize=12)
+    ax1.plot(points_per_snapshot, mean_acc, linestyle='-', color='blue', linewidth=2, label="Mean Accuracy")
+    ax1.fill_between(points_per_snapshot, mean_acc - std_acc, mean_acc + std_acc, color='blue', alpha=0.15, label="Accuracy ± 1 STD")
+    ax1.tick_params(axis="y", labelcolor="blue")
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    # Secondary Y-axis: First Spike Timestep
+    ax2 = ax1.twinx()  
+    ax2.set_ylabel("First Spike Timestep (ms)", color="darkorange", fontsize=12)
+    ax2.plot(points_per_batch, mean_fs, linestyle='-', color='darkorange', alpha=0.8, linewidth=1.5, label="Mean First Spike Timestep")
+    ax2.fill_between(points_per_batch, mean_fs - std_fs, mean_fs + std_fs, color='darkorange', alpha=0.1, label="First Spike ± 1 STD")
+    ax2.tick_params(axis="y", labelcolor="darkorange")
+    plt.title(f"Accuracy-First Spike Timestep / No. of Training Examples, {num_runs} Runs (WTA on)", fontsize=14)
+    fig.tight_layout()
+    plt.savefig(output_dir / "accuracy-first_spike_timestep-time.png", dpi=300)
+    # ------ ACCURACY-TIME OF FIRST SPIKE / TIME END --------
