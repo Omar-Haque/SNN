@@ -1,0 +1,22 @@
+\relax 
+\@writefile{toc}{\contentsline {section}{\numberline {1}Initial story}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Terminology}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Hypotheses}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Hypothesis testing}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Hypothesis 1 (baseline): The number of excitatory neurons in the reservoir decays linearly and reaches 0 at the time of the spike.}{2}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Number of neurons in the reservoir decays linearly}}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Hypothesis 2 (refill: If, at a certain point in training, we intervene by refilling the reservoir, and by resetting $n$ trained neurons to their initialization states, the accuracy spike will get delayed by a factor linearly proportional to $n$.)}{2}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Refill at different n values, seed 0}}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Hypothesis 3 (pseudo-refill): If, at a certain point in training, we intervene by resetting $n$ trained neurons to their initialization states, but make their adaptive thresholds equal to the median of the trained neuron populations' threshold, the spike will still happen at the same time, but it will have a lower peak accuracy.}{3}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Pseudo-refill n=50 reservoir neurons 110k training points, seed 0}}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Hypothesis 4 (sabotage): If, at a certain point in training, we intervene by raising the threshold of every neuron in the reservoir to the median of the trained neurons, but don't change their weights, the spike will happen near-instantaneously (within 5-10k examples), but it will have a lower peak accuracy (depending on how early we sabotage, i.e how many reservoir neurons we sabotage)}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Sabotage at 100k training examples, seed 0}}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Hypothesis 5 (imprint): If, at a certain point in training, we intervene by giving each reservoir neuron a random training image as template (normalized to 78.4), and set their $\theta =$ trained median, the spike happens near instantaneously (within 5-10k examples)}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Imprint at 100k training examples, seed 0}}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6}Hypothesis 6 (hijacking): The neurons that are "recruited" (moved from the recruitable reservoir to trained neurons) dominate the network for a few data points, before their threshold reaches high enough for another reservoir neuron to win and repeat the process. Hijacking stops at the accuracy spike}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{How to read left side figures (two-panels).}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Age of winner (left), and activity at recruitment (right)}}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{How to read right side figures (the colorful ones)}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Differences between baseline, refill, pseudo-refill, sabotage, and imprint}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Overall conclusion}{6}{}\protected@file@percent }
+\gdef \@abspage@last{7}

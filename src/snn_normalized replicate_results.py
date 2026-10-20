@@ -3,6 +3,9 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from snntorch import spikegen
 import math
+import time
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
@@ -11,6 +14,8 @@ from pathlib import Path
 
 
 script_dir: Path = Path(__file__).parent
+output_dir: Path = script_dir / "results"
+output_dir.mkdir(parents=True, exist_ok=True)
 # Import MNIST train and test
 train_dataset: datasets.MNIST = datasets.MNIST(
     root='./data',
@@ -106,12 +111,12 @@ class excitatory_neurons(nn.Module):
         # spikes[is_refractory] = 0.0  # NEW: Cannot spike during refractory period
         
         # WTA
-        competing_v = self.v.clone()
-        competing_v[spikes == 0.0] = -float("inf")
-        max_v_indices: torch.Tensor = torch.argmax(competing_v, dim=1)
-        wta_mask = torch.zeros_like(spikes)
-        wta_mask.scatter_(1, max_v_indices.unsqueeze(1), 1.0)
-        spikes = spikes * wta_mask
+        # competing_v = self.v.clone()
+        # competing_v[spikes == 0.0] = -float("inf")
+        # max_v_indices: torch.Tensor = torch.argmax(competing_v, dim=1)
+        # wta_mask = torch.zeros_like(spikes)
+        # wta_mask.scatter_(1, max_v_indices.unsqueeze(1), 1.0)
+        # spikes = spikes * wta_mask
         
         # ones = spikes.sum(dim=1)
         # morethanone = (ones > 1).any().item()
@@ -252,8 +257,8 @@ def visualize_learned_templates(model: DiehlAndCookNetwork) -> None:
         # Hide the x and y axis ticks
         ax.set_xticks([])
         ax.set_yticks([])
-    plt.savefig(script_dir / f"theta_templates.png")
-    plt.show()
+    plt.savefig(output_dir / f"theta_templates.png")
+    plt.close(fig)
 
 def visualize_confusion_matrix(conf_matrix: np.ndarray, step: int) -> None:
     plt.figure(figsize=(8, 6))
@@ -276,7 +281,60 @@ def visualize_confusion_matrix(conf_matrix: np.ndarray, step: int) -> None:
                      color="white" if conf_matrix[i, j] > thresh else "black")
             
     plt.tight_layout()
-    plt.show()
+    plt.savefig(output_dir / f"confusion_matrix_{step}.png")
+    plt.close()
+
+# ---------------------------------------------------------------------------------------------------------------
+# Cooper / BindsNET-style accuracy estimate.
+# Port of bindsnet.evaluation.{assign_labels, all_activity, proportion_weighting} and of the bookkeeping in
+# bindsnet/examples/mnist/batch_eth_mnist.py. Differences from assign_neuron_labels()/evaluate_network() below:
+#   * uses the spikes recorded DURING TRAINING (plasticity on), not a separate no-learning pass
+#   * each window of `update_interval` training samples is scored with the assignments computed from the
+#     PREVIOUS windows; `rates` accumulate over the whole run (alpha = 1.0), so assignments lag
+#   * "all" votes = spikes per class / number of neurons assigned to that class (classes with few assigned
+#     neurons are amplified); "proportion" additionally weights each neuron by its class proportion
+#   * neurons that have never fired have all-zero rates -> NaN proportions -> set to 0 -> argmax gives class 0,
+#     i.e. BindsNET silently assigns every dormant neuron to digit 0 (no "unassigned" state)
+#   * the very first window is scored with assignments = -1 everywhere, which is why BindsNET curves start ~10%
+# Costs nothing extra: no additional presentations are run.
+# ---------------------------------------------------------------------------------------------------------------
+@torch.no_grad()
+def bindsnet_assign_labels(spikes: torch.Tensor, labels: torch.Tensor, n_labels: int, rates: torch.Tensor | None = None, alpha: float = 1.0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # spikes: [n_samples, n_neurons] spike counts (already summed over time); labels: [n_samples]
+    n_neurons = spikes.size(1)
+    if rates is None:
+        rates = torch.zeros((n_neurons, n_labels), device=spikes.device)
+    for i in range(n_labels):
+        n_labeled = torch.sum(labels == i).float()
+        if n_labeled > 0:
+            indices = torch.nonzero(labels == i).view(-1)
+            rates[:, i] = alpha * rates[:, i] + (torch.sum(spikes[indices], 0) / n_labeled)
+    proportions = rates / rates.sum(1, keepdim=True)
+    proportions[proportions != proportions] = 0  # NaNs (never-fired neurons) -> 0, exactly as BindsNET does
+    assignments = torch.max(proportions, 1)[1]
+    return assignments, proportions, rates
+
+@torch.no_grad()
+def bindsnet_all_activity(spikes: torch.Tensor, assignments: torch.Tensor, n_labels: int) -> torch.Tensor:
+    n_samples = spikes.size(0)
+    rates = torch.zeros((n_samples, n_labels), device=spikes.device)
+    for i in range(n_labels):
+        n_assigns = torch.sum(assignments == i).float()
+        if n_assigns > 0:
+            indices = torch.nonzero(assignments == i).view(-1)
+            rates[:, i] = torch.sum(spikes[:, indices], 1) / n_assigns
+    return torch.sort(rates, dim=1, descending=True)[1][:, 0]
+
+@torch.no_grad()
+def bindsnet_proportion_weighting(spikes: torch.Tensor, assignments: torch.Tensor, proportions: torch.Tensor, n_labels: int) -> torch.Tensor:
+    n_samples = spikes.size(0)
+    rates = torch.zeros((n_samples, n_labels), device=spikes.device)
+    for i in range(n_labels):
+        n_assigns = torch.sum(assignments == i).float()
+        if n_assigns > 0:
+            indices = torch.nonzero(assignments == i).view(-1)
+            rates[:, i] += torch.sum((proportions[:, i] * spikes)[:, indices], 1) / n_assigns
+    return torch.sort(rates, dim=1, descending=True)[1][:, 0]
 
 @torch.no_grad()
 def assign_neuron_labels(model: DiehlAndCookNetwork, data_loader: DataLoader, device: torch.device, num_steps: int) -> torch.Tensor:
@@ -311,6 +369,7 @@ def assign_neuron_labels(model: DiehlAndCookNetwork, data_loader: DataLoader, de
             
         # For each image in the batch, map the spikes to its target label
         for digit in range(10):
+            # targets has shape (batch_size, )
             mask = (targets == digit)
             if mask.any():
                 # Divide by the number of images in the mask to get the average
@@ -325,8 +384,8 @@ def assign_neuron_labels(model: DiehlAndCookNetwork, data_loader: DataLoader, de
     neuron_assignments[dead_neurons] = -1
     
     print("Neuron assignments complete")
-    for digit in range(10):
-        count = (neuron_assignments == digit).sum().item()
+    # for digit in range(10):
+    #     count = (neuron_assignments == digit).sum().item()
         # print(f"Digit {digit} was assigned to {count} neurons.")
         
     dead_count = (neuron_assignments == -1).sum().item()
@@ -417,6 +476,21 @@ def train(
     accuracy_history = []
     snapshot_interval = 100
 
+    # Tracking variables for the Cooper / BindsNET-style running estimate (see bindsnet_* helpers above).
+    # BindsNET: update_interval = 250 samples rounded down to whole batches -> 224 samples at batch size 32.
+    cooper_batch_size: int = train_loader.batch_size
+    cooper_update_steps: int = int(250 / cooper_batch_size)
+    cooper_update_interval: int = cooper_update_steps * cooper_batch_size
+    cooper_spike_record = torch.zeros(cooper_update_interval, model.num_neurons, device=device)
+    cooper_label_record = torch.zeros(cooper_update_interval, dtype=torch.long, device=device)
+    cooper_assignments = -torch.ones(model.num_neurons, dtype=torch.long, device=device)
+    cooper_proportions = torch.zeros(model.num_neurons, 10, device=device)
+    cooper_rates = torch.zeros(model.num_neurons, 10, device=device)
+    cooper_points_history = []
+    cooper_all_history = []
+    cooper_proportion_history = []
+    global_batch_idx = 0  # counts batches across epochs (BindsNET restarts `step` every epoch; a global counter avoids a torn window at epoch boundaries)
+
     # Tracking variables for voltage/theta vs timesteps plot
     dominant_idx = None
     track_steps = []
@@ -441,6 +515,9 @@ def train(
 
             # Reset the network memory for a new batch
             model.reset(batch_size, device)
+
+            # Spike counts of this batch over the whole presentation (plasticity on) for the Cooper / BindsNET-style estimate
+            batch_train_spikes = torch.zeros(batch_size, model.num_neurons, device=device)
             
             # Identify the greediest neuron after 5,000 samples
             if track_dominant_neuron and dominant_idx is None and total_points_processed > 5000:
@@ -448,31 +525,38 @@ def train(
                 print(f"\n Tracking passive neuron #{dominant_idx}")
             
             # Track the highest voltage it reaches in this batch.
-            highest_v_in_batch: float = -1000.0
-            dominant_spiked_in_batch: bool = False
-            
-            # Simulate num_steps milliseconds of biological time
+            highest_v_in_batch = torch.full((), -1000.0, device=device)
+            dominant_spike_count = torch.zeros((), device=device)
+
             for t in range(num_steps):
-                # Forward pass with those extracted spikes.
                 out_spikes: torch.Tensor = model(spike_data[t])
-                
-                # If we have our target, retrieve its raw voltage
+                batch_train_spikes += out_spikes
                 if track_dominant_neuron and dominant_idx is not None:
-                    # Get the target neuron's voltage across all 32 images in the batch
-                    current_v = model.neurons.raw_v[:, dominant_idx] # type: ignore
-                    # Update the highest voltage seen so far
-                    highest_v_in_batch = max(highest_v_in_batch, current_v.max().item())
-                    if out_spikes[:, dominant_idx].sum().item() > 0: # type: ignore
-                        dominant_spiked_in_batch = True
-            
+                    highest_v_in_batch = torch.maximum(highest_v_in_batch, model.neurons.raw_v[:, dominant_idx].max())
+                    dominant_spike_count += out_spikes[:, dominant_idx].sum()
+
             total_points_processed += batch_size
-            
-            # Log the data for our graph every batch
+
+            # Cooper / BindsNET-style estimate: fill the window; every cooper_update_steps batches score it with the
+            # assignments from the previous windows, then update the (cumulative) assignments. Two .item() calls per window.
+            if track_accuracy_curve and batch_size == cooper_batch_size:
+                slot = (global_batch_idx % cooper_update_steps) * cooper_batch_size
+                cooper_spike_record[slot:slot + batch_size] = batch_train_spikes
+                cooper_label_record[slot:slot + batch_size] = targets
+                if (global_batch_idx + 1) % cooper_update_steps == 0:
+                    all_pred = bindsnet_all_activity(cooper_spike_record, cooper_assignments, 10)
+                    prop_pred = bindsnet_proportion_weighting(cooper_spike_record, cooper_assignments, cooper_proportions, 10)
+                    cooper_points_history.append(total_points_processed)
+                    cooper_all_history.append(100.0 * (all_pred == cooper_label_record).float().mean().item())
+                    cooper_proportion_history.append(100.0 * (prop_pred == cooper_label_record).float().mean().item())
+                    cooper_assignments, cooper_proportions, cooper_rates = bindsnet_assign_labels(cooper_spike_record, cooper_label_record, 10, cooper_rates)
+            global_batch_idx += 1
+
             if track_dominant_neuron and dominant_idx is not None:
                 track_steps.append(total_points_processed)
-                track_vmax.append(highest_v_in_batch)
-                track_theta.append(model.neurons.theta[dominant_idx].item()) # type: ignore
-                track_spiked.append(dominant_spiked_in_batch)
+                track_vmax.append(highest_v_in_batch.item())
+                track_theta.append(model.neurons.theta[dominant_idx].item())
+                track_spiked.append(dominant_spike_count.item() > 0)
             
             # Estimated accuracy evaluation
             if track_accuracy_curve and batch_idx % snapshot_interval == 0:
@@ -489,14 +573,24 @@ def train(
 
     # Plot accuracy curve
     if track_accuracy_curve and len(points_history) > 0:
+        # Tag outputs with the run's key parameters and a timestamp so successive runs never overwrite each other
+        run_tag = (f"inh{model.inh_matrix[0, 1].item():g}_tp{model.neurons.theta_plus:g}"
+                   f"_td{-1.0 / math.log(model.neurons.theta_decay):.0e}_{time.strftime('%Y%m%d-%H%M%S')}")
         plt.figure(figsize=(10, 6))
-        plt.plot(points_history, accuracy_history, linestyle='-', color='blue', linewidth=2)
-        plt.title(f"Accuracy Curve ({model.num_neurons} Neurons)")
+        plt.plot(cooper_points_history, cooper_all_history, linestyle='-', color='tab:gray', linewidth=1, alpha=0.8, label=f'BindsNET "all" (training window of {cooper_update_interval})')
+        plt.plot(cooper_points_history, cooper_proportion_history, linestyle='-', color='tab:orange', linewidth=1, alpha=0.8, label=f'BindsNET "proportion" (training window of {cooper_update_interval})')
+        plt.plot(points_history, accuracy_history, linestyle='-', color='blue', linewidth=2, label='Held-out (assign on 2k train, score 1k test)')
+        plt.title(f"Accuracy Curve ({model.num_neurons} Neurons) | {run_tag}", fontsize=11)
         plt.xlabel("Number of Training Points Processed")
-        plt.ylabel("Accuracy (%) on Validation Subset")
+        plt.ylabel("Accuracy (%)")
+        plt.legend(loc='lower right')
         plt.grid(True, linestyle='--', alpha=0.7)
-        plt.savefig(script_dir / f"accuracy-time.png")
-        plt.show()
+        # Raw numbers behind the plot, so curves can be re-plotted / overlaid without re-running
+        np.savez(output_dir / f"accuracy-time_{run_tag}.npz",
+                 points=np.array(points_history), accuracy=np.array(accuracy_history),
+                 cooper_points=np.array(cooper_points_history), cooper_all=np.array(cooper_all_history), cooper_proportion=np.array(cooper_proportion_history))
+        plt.savefig(output_dir / f"accuracy-time_{run_tag}.png")
+        plt.close()
 
     # Plot the neuron voltage-theta/time graph
     if track_dominant_neuron and dominant_idx is not None and len(track_steps) > 1:
@@ -523,8 +617,8 @@ def train(
         plt.legend(handles=legend_elements, fontsize=12, loc='lower right')
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.tight_layout()
-        plt.savefig(script_dir / f"neuron_{dominant_idx}_intersection.png", dpi=300)
-        plt.show()
+        plt.savefig(output_dir / f"neuron_{dominant_idx}_intersection.png", dpi=300)
+        plt.close()
     
     if generate_confusion_matrix:
         temp_labels = assign_neuron_labels(model, snapshot_assign_loader, device, num_steps)
@@ -534,9 +628,9 @@ def train(
     if visualize_templates:
         visualize_learned_templates(model)
         
-    neuron_labels = assign_neuron_labels(model, train_loader, device, num_steps)
-    test_accuracy = evaluate_network(model, test_loader, neuron_labels, device, num_steps)
-    print(f"Final test set accuracy: {test_accuracy}%")
+    # neuron_labels = assign_neuron_labels(model, train_loader, device, num_steps)
+    # test_accuracy = evaluate_network(model, test_loader, neuron_labels, device, num_steps)
+    # print(f"Final test set accuracy: {test_accuracy}%")
     
     return model
 
@@ -564,7 +658,7 @@ if __name__ == '__main__':
         num_epochs=3,
         num_steps=350,
         track_accuracy_curve=True,
-        track_dominant_neuron=True,
+        track_dominant_neuron=False,
         generate_confusion_matrix=False,
         visualize_templates=False
     )

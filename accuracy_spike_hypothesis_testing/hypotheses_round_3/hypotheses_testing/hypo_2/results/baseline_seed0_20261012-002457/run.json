@@ -1,0 +1,64 @@
+{
+  "seed": 0,
+  "num_epochs": 3,
+  "num_steps": 350,
+  "snapshot_interval": 100,
+  "thr": 1e-06,
+  "thr_strict": 1e-05,
+  "batch_size": 32,
+  "smoke": false,
+  "tag": "",
+  "run_name": "baseline_seed0_20261012-002457",
+  "spike_time": 134432.0,
+  "prepost_means": {
+    "cnt_stdp": {
+      "pre": 179802.140625,
+      "post": 174605.328125
+    },
+    "cnt_net": {
+      "pre": 566484.0,
+      "post": 376263.375
+    },
+    "cnt_net_strict": {
+      "pre": 366154.3125,
+      "post": 224006.421875
+    },
+    "rows_net": {
+      "pre": 852.3861694335938,
+      "post": 780.7661743164062
+    },
+    "fro_stdp": {
+      "pre": 2.46748948097229,
+      "post": 1.7572590112686157
+    },
+    "fro_net": {
+      "pre": 1.8220746517181396,
+      "post": 1.248818278312683
+    },
+    "cnt_batch": {
+      "pre": 49644.36328125,
+      "post": 54718.8125
+    },
+    "cnt_batch_strict": {
+      "pre": 40142.53125,
+      "post": 38146.9609375
+    },
+    "spikes": {
+      "pre": 958.31982421875,
+      "post": 786.9550170898438
+    },
+    "active": {
+      "pre": 78.08663940429688,
+      "post": 121.11421203613281
+    }
+  },
+  "theta_plus": 0.05,
+  "theta_decay_tc": 10000000.004863936,
+  "inhibition_mV": 200.0,
+  "lr_plus": 0.01,
+  "lr_minus": 0.0001,
+  "num_neurons": 400,
+  "num_weights": 313600,
+  "device": "mps",
+  "minutes": 49.815879782040916
+}

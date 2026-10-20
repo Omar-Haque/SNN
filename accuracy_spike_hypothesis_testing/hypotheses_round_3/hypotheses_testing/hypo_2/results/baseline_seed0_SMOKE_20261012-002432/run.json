@@ -1,0 +1,23 @@
+{
+  "seed": 0,
+  "num_epochs": 1,
+  "num_steps": 25,
+  "snapshot_interval": 5,
+  "thr": 1e-06,
+  "thr_strict": 1e-05,
+  "batch_size": 32,
+  "smoke": true,
+  "tag": "",
+  "run_name": "baseline_seed0_SMOKE_20261012-002432",
+  "spike_time": NaN,
+  "prepost_means": {},
+  "theta_plus": 0.05,
+  "theta_decay_tc": 10000000.004863936,
+  "inhibition_mV": 200.0,
+  "lr_plus": 0.01,
+  "lr_minus": 0.0001,
+  "num_neurons": 400,
+  "num_weights": 313600,
+  "device": "mps",
+  "minutes": 0.03749141693115234
+}
