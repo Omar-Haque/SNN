@@ -1,0 +1,39 @@
+No conda package cache directories found outside your home directory. To
+prevent conda from filling up your home directory, you can create a new
+directory at `/work/pi_<your_pi_name>/$USER/.conda/pkgs` and reload the module. 
+No conda environment directories found outside your home directory. To prevent
+conda from filling up your home directory, you can create a new directory at
+`/work/pi_<your_pi_name>/$USER/.conda/envs` and reload the module. 
+Loading conda version miniforge3-24.7.1
+node gypsum-gpu020 | gpu: Tesla M40 24GB, 580.178.04 | start Mon Nov  2 06:31:00 PM UTC 2026
+device: cuda
+config: {"theta_plus": 0.05, "theta_tau": null, "inhibition": 200.0, "neurons": 400, "examples": 60000, "raster_at": "3200,32000", "watch_from": 20000, "n_recruits": 6, "track_batches": 300, "inbatch_batches": 3, "frame_every": 50, "win_spikes": 15, "seed": 0, "steps": 350, "tag": "", "smoke": false, "replot": null, "run_name": "demo_tp0.05_inh200_ex60k_seed0_20261102-183147", "raster_at_list": [3200, 32000], "device": "cuda"}
+   3200 ex | flat templates 385 | trained θ med  -33.8 | recruits tracked 0 |  0.6 min
+[raster] logged batch at 3200 examples: distinct neurons per presentation = 2.03, winner spikes = 30.7, presentations whose first spike is a tie = 10/32 (biggest: 11 neurons at once, presentation 9)
+   6400 ex | flat templates 372 | trained θ med  -31.4 | recruits tracked 0 |  1.1 min
+   9600 ex | flat templates 360 | trained θ med  -30.3 | recruits tracked 0 |  1.6 min
+  12800 ex | flat templates 349 | trained θ med  -29.2 | recruits tracked 0 |  2.2 min
+  16000 ex | flat templates 337 | trained θ med  -28.6 | recruits tracked 0 |  2.7 min
+  19200 ex | flat templates 327 | trained θ med  -28.0 | recruits tracked 0 |  3.2 min
+[recruit] neuron 267 won its first presentation at 19968 examples (label 2, 45 spikes); theta -47.2 vs trained median -27.9
+[recruit] neuron 241 won its first presentation at 20000 examples (label 0, 50 spikes); theta -50.3 vs trained median -27.9
+[recruit] neuron 304 won its first presentation at 20000 examples (label 0, 35 spikes); theta -51.1 vs trained median -27.9
+[recruit] neuron 368 won its first presentation at 20256 examples (label 9, 38 spikes); theta -51.1 vs trained median -27.9
+[recruit] neuron 40 won its first presentation at 20416 examples (label 5, 31 spikes); theta -51.6 vs trained median -27.9
+[recruit] neuron 82 won its first presentation at 20416 examples (label 6, 41 spikes); theta -51.1 vs trained median -27.9
+  22400 ex | flat templates 318 | trained θ med  -27.5 | recruits tracked 6 |  3.7 min
+  25600 ex | flat templates 306 | trained θ med  -27.3 | recruits tracked 6 |  4.2 min
+  28800 ex | flat templates 295 | trained θ med  -27.1 | recruits tracked 6 |  4.8 min
+  32000 ex | flat templates 284 | trained θ med  -27.4 | recruits tracked 6 |  5.3 min
+[raster] logged batch at 32000 examples: distinct neurons per presentation = 2.62, winner spikes = 28.3, presentations whose first spike is a tie = 19/32 (biggest: 7 neurons at once, presentation 3)
+  35200 ex | flat templates 272 | trained θ med  -27.3 | recruits tracked 6 |  5.8 min
+  38400 ex | flat templates 263 | trained θ med  -26.8 | recruits tracked 6 |  6.3 min
+  41600 ex | flat templates 253 | trained θ med  -26.7 | recruits tracked 6 |  6.9 min
+  44800 ex | flat templates 244 | trained θ med  -26.6 | recruits tracked 6 |  7.4 min
+  48000 ex | flat templates 233 | trained θ med  -26.5 | recruits tracked 6 |  7.9 min
+  51200 ex | flat templates 223 | trained θ med  -26.3 | recruits tracked 6 |  8.4 min
+  54400 ex | flat templates 210 | trained θ med  -26.3 | recruits tracked 6 |  8.9 min
+  57600 ex | flat templates 202 | trained θ med  -26.3 | recruits tracked 6 |  9.5 min
+done training; 2 rasters, 6 recruits
+finished in 9.9 min -> /home/csigrist_umass_edu/SNN/new_architecture_testing/STDP_testing/results/demo_tp0.05_inh200_ex60k_seed0_20261102-183147
+end Mon Nov  2 06:42:05 PM UTC 2026

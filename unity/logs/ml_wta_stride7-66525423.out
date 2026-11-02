@@ -1,0 +1,75 @@
+No conda package cache directories found outside your home directory. To
+prevent conda from filling up your home directory, you can create a new
+directory at `/work/pi_<your_pi_name>/$USER/.conda/pkgs` and reload the module. 
+No conda environment directories found outside your home directory. To prevent
+conda from filling up your home directory, you can create a new directory at
+`/work/pi_<your_pi_name>/$USER/.conda/envs` and reload the module. 
+Loading conda version miniforge3-24.7.1
+node gypsum-gpu018 | gpu: Tesla M40 24GB, 580.178.04 | start Mon Nov  2 06:31:04 PM UTC 2026
+Using CUDA.
+config: {"arm": "baseline", "sweep": true, "multi": true, "seed": 0, "num_epochs": 2, "num_steps": 350, "snapshot_interval": 100, "batch_size": 32, "smoke": false, "tag": "", "run_name": "unshared_p7s7f16_n400_tp0.5_nodecay_ep2_seed0_l1wta_l2wta_20261102-183156", "init": "uniform", "theta_init": null, "theta_tau": null, "theta_plus_arg": 0.5, "inhibition_arg": 200.0, "theta_max": null, "anneal_at": null, "theta_plus_late": null, "l2_wta": true, "l1_wta": true, "no_l1": false, "patch": 7, "stride": 7, "features": 16, "shared": false, "pool2": false, "l1_theta_plus": 0.1, "l1_theta_tau": 2000.0, "l1_theta_shared": false, "l1_norm": 12.0, "l1_wmax": 1.5, "l1_inhibition": 200.0, "l1_stdp_reduce": "sum", "l1_examples": 30000, "l1_snapshot": 20, "l1_stop_stationary": true, "l2_inputs": 256, "l2_norm": 25.6, "l2_wmax": 1.0, "shift": 2}
+[layer 1]    640 ex | flat templates 256/256 | sharp med 0.22 | θ med  -51.9 p90  -49.4 | windows fired   74% latency  61.6 ms | per active window:  8.3 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 1.28 |  0.2 min
+[layer 1]   1280 ex | flat templates 253/256 | sharp med 0.22 | θ med  -51.9 p90  -48.0 | windows fired   76% latency  62.9 ms | per active window:  7.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.68 |  0.4 min
+[layer 1]   1920 ex | flat templates 252/256 | sharp med 0.22 | θ med  -51.8 p90  -46.8 | windows fired   76% latency  60.1 ms | per active window:  8.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.60 |  0.6 min
+[layer 1]   2560 ex | flat templates 251/256 | sharp med 0.22 | θ med  -51.8 p90  -45.9 | windows fired   76% latency  60.7 ms | per active window:  8.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.45 |  0.7 min
+[layer 1]   3200 ex | flat templates 249/256 | sharp med 0.22 | θ med  -51.9 p90  -45.3 | windows fired   78% latency  61.6 ms | per active window:  7.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.37 |  0.9 min
+[layer 1]   3840 ex | flat templates 246/256 | sharp med 0.22 | θ med  -51.9 p90  -44.7 | windows fired   78% latency  60.2 ms | per active window:  7.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.33 |  1.1 min
+[layer 1]   4480 ex | flat templates 245/256 | sharp med 0.22 | θ med  -51.9 p90  -44.4 | windows fired   77% latency  59.8 ms | per active window:  7.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.28 |  1.3 min
+[layer 1]   5120 ex | flat templates 242/256 | sharp med 0.22 | θ med  -51.9 p90  -44.3 | windows fired   78% latency  59.5 ms | per active window:  7.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.22 |  1.4 min
+[layer 1]   5760 ex | flat templates 241/256 | sharp med 0.22 | θ med  -51.9 p90  -44.2 | windows fired   78% latency  59.8 ms | per active window:  8.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.26 |  1.6 min
+[layer 1]   6400 ex | flat templates 239/256 | sharp med 0.22 | θ med  -51.9 p90  -43.8 | windows fired   78% latency  58.6 ms | per active window:  7.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.23 |  1.8 min
+[layer 1]   7040 ex | flat templates 238/256 | sharp med 0.22 | θ med  -51.9 p90  -43.8 | windows fired   78% latency  59.1 ms | per active window:  8.1 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.17 |  1.9 min
+[layer 1]   7680 ex | flat templates 237/256 | sharp med 0.22 | θ med  -51.9 p90  -44.0 | windows fired   79% latency  59.0 ms | per active window:  8.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.17 |  2.1 min
+[layer 1]   8320 ex | flat templates 237/256 | sharp med 0.22 | θ med  -51.9 p90  -44.0 | windows fired   79% latency  58.3 ms | per active window:  8.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.15 |  2.3 min
+[layer 1]   8960 ex | flat templates 235/256 | sharp med 0.22 | θ med  -51.9 p90  -44.0 | windows fired   78% latency  58.0 ms | per active window:  8.2 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.16 |  2.5 min
+[layer 1]   9600 ex | flat templates 234/256 | sharp med 0.22 | θ med  -51.9 p90  -43.9 | windows fired   79% latency  58.3 ms | per active window:  8.2 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.17 |  2.6 min
+[layer 1]  10240 ex | flat templates 233/256 | sharp med 0.22 | θ med  -51.9 p90  -43.8 | windows fired   80% latency  57.5 ms | per active window:  8.1 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.14 |  2.8 min
+[layer 1]  10880 ex | flat templates 234/256 | sharp med 0.22 | θ med  -51.9 p90  -43.9 | windows fired   79% latency  57.6 ms | per active window:  8.2 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  3.0 min
+[layer 1]  11520 ex | flat templates 234/256 | sharp med 0.22 | θ med  -51.9 p90  -43.9 | windows fired   80% latency  56.8 ms | per active window:  8.1 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  3.1 min
+[layer 1]  12160 ex | flat templates 233/256 | sharp med 0.22 | θ med  -51.9 p90  -43.8 | windows fired   79% latency  57.1 ms | per active window:  8.2 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.14 |  3.3 min
+[layer 1]  12800 ex | flat templates 233/256 | sharp med 0.22 | θ med  -51.9 p90  -43.8 | windows fired   80% latency  57.2 ms | per active window:  8.2 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.15 |  3.5 min
+[layer 1]  13440 ex | flat templates 233/256 | sharp med 0.22 | θ med  -51.9 p90  -43.7 | windows fired   78% latency  57.1 ms | per active window:  8.2 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.18 |  3.7 min
+[layer 1] stationary: the reservoir has not shrunk for 5 snapshots (233 flat templates left, mostly windows that never see ink) and the median theta moved < 0.3 mV -> freezing at 13440 examples
+[calibration] layer 1 -> layer 2: 0.17 input spikes/ms per presentation over 256 lines; mean weight set to 6.941 (row sum 1776.8, w_max 69.41) for 1.2 mV/ms initial drive
+[layer 2]      32 ex | held-out acc  28.6% shifted  21.4% | reservoir 400 | hijacker idx 0.91 | L2 spikes/presentation   0.3 from  1.0 distinct neurons (last batch) | L1 spikes/presentation   0.6 |   0.1 min
+[layer 2]    3232 ex | held-out acc  35.0% shifted  23.0% | reservoir 400 | hijacker idx 0.18 | L2 spikes/presentation  21.9 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  60.9 |   1.0 min
+[layer 2]    6432 ex | held-out acc  30.9% shifted  21.4% | reservoir 400 | hijacker idx 0.14 | L2 spikes/presentation  18.8 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.0 |   2.0 min
+[layer 2]    9632 ex | held-out acc  29.2% shifted  20.4% | reservoir 400 | hijacker idx 0.12 | L2 spikes/presentation  18.6 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.7 |   3.0 min
+[layer 2]   12832 ex | held-out acc  30.6% shifted  18.6% | reservoir 400 | hijacker idx 0.14 | L2 spikes/presentation  18.2 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.7 |   4.0 min
+[layer 2]   16032 ex | held-out acc  42.8% shifted  28.5% | reservoir 400 | hijacker idx 0.12 | L2 spikes/presentation  15.9 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.2 |   5.0 min
+[layer 2]   19232 ex | held-out acc  41.0% shifted  26.7% | reservoir 400 | hijacker idx 0.12 | L2 spikes/presentation  14.4 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.1 |   5.9 min
+[layer 2]   22432 ex | held-out acc  39.0% shifted  25.2% | reservoir 400 | hijacker idx 0.11 | L2 spikes/presentation  14.0 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.6 |   6.9 min
+[layer 2]   25632 ex | held-out acc  41.7% shifted  29.1% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  13.5 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.2 |   7.9 min
+[layer 2]   28832 ex | held-out acc  43.1% shifted  27.8% | reservoir 400 | hijacker idx 0.11 | L2 spikes/presentation  13.1 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  60.9 |   8.9 min
+[layer 2]   32032 ex | held-out acc  43.9% shifted  28.6% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  12.6 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.0 |   9.9 min
+[layer 2]   35232 ex | held-out acc  44.8% shifted  29.7% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  12.3 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  60.8 |  10.8 min
+[layer 2]   38432 ex | held-out acc  44.4% shifted  27.8% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  12.1 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.4 |  11.8 min
+[layer 2]   41632 ex | held-out acc  44.9% shifted  29.0% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  11.7 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  60.7 |  12.8 min
+[layer 2]   44832 ex | held-out acc  45.0% shifted  33.2% | reservoir 400 | hijacker idx 0.11 | L2 spikes/presentation  11.5 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  60.7 |  13.8 min
+[layer 2]   48032 ex | held-out acc  45.1% shifted  32.2% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  11.4 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.4 |  14.8 min
+[layer 2]   51232 ex | held-out acc  44.6% shifted  31.3% | reservoir 400 | hijacker idx 0.11 | L2 spikes/presentation  11.2 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.6 |  15.8 min
+[layer 2]   54432 ex | held-out acc  45.2% shifted  32.9% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  10.8 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  60.5 |  16.7 min
+[layer 2]   57632 ex | held-out acc  47.5% shifted  30.6% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  10.6 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  60.1 |  17.7 min
+[layer 2]   60832 ex | held-out acc  48.1% shifted  29.8% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  10.6 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.4 |  18.7 min
+[layer 2]   64032 ex | held-out acc  49.8% shifted  29.4% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  10.5 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  60.9 |  19.7 min
+[layer 2]   67232 ex | held-out acc  48.3% shifted  30.7% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  10.3 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.2 |  20.7 min
+[layer 2]   70432 ex | held-out acc  49.0% shifted  29.7% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  10.2 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.2 |  21.6 min
+[layer 2]   73632 ex | held-out acc  50.3% shifted  31.1% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation  10.0 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.0 |  22.6 min
+[layer 2]   76832 ex | held-out acc  49.7% shifted  29.5% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation   9.9 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  60.9 |  23.6 min
+[layer 2]   80032 ex | held-out acc  49.1% shifted  34.3% | reservoir 400 | hijacker idx 0.11 | L2 spikes/presentation   9.9 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.5 |  24.6 min
+[layer 2]   83232 ex | held-out acc  51.0% shifted  32.8% | reservoir 400 | hijacker idx 0.11 | L2 spikes/presentation   9.7 from  1.1 distinct neurons (last batch) | L1 spikes/presentation  60.8 |  25.6 min
+[layer 2]   86432 ex | held-out acc  47.6% shifted  33.5% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation   9.6 from  1.1 distinct neurons (last batch) | L1 spikes/presentation  61.0 |  26.6 min
+[layer 2]   89632 ex | held-out acc  47.7% shifted  33.2% | reservoir 400 | hijacker idx 0.10 | L2 spikes/presentation   9.6 from  1.0 distinct neurons (last batch) | L1 spikes/presentation  61.4 |  27.5 min
+[layer 2]   92832 ex | held-out acc  53.9% shifted  36.3% | reservoir 399 | hijacker idx 0.10 | L2 spikes/presentation   9.5 from  1.1 distinct neurons (last batch) | L1 spikes/presentation  61.6 |  28.5 min
+[layer 2]   96032 ex | held-out acc  49.2% shifted  34.8% | reservoir 399 | hijacker idx 0.10 | L2 spikes/presentation   9.4 from  1.1 distinct neurons (last batch) | L1 spikes/presentation  61.0 |  29.5 min
+[layer 2]   99232 ex | held-out acc  51.3% shifted  35.7% | reservoir 399 | hijacker idx 0.11 | L2 spikes/presentation   9.2 from  1.1 distinct neurons (last batch) | L1 spikes/presentation  61.0 |  30.5 min
+[layer 2]  102432 ex | held-out acc  49.4% shifted  32.5% | reservoir 399 | hijacker idx 0.10 | L2 spikes/presentation   9.2 from  1.1 distinct neurons (last batch) | L1 spikes/presentation  61.0 |  31.5 min
+[layer 2]  105632 ex | held-out acc  52.8% shifted  34.7% | reservoir 399 | hijacker idx 0.11 | L2 spikes/presentation   9.1 from  1.1 distinct neurons (last batch) | L1 spikes/presentation  60.8 |  32.5 min
+[layer 2]  108832 ex | held-out acc  49.3% shifted  32.8% | reservoir 398 | hijacker idx 0.11 | L2 spikes/presentation   9.1 from  1.4 distinct neurons (last batch) | L1 spikes/presentation  61.6 |  33.4 min
+[layer 2]  112032 ex | held-out acc  51.6% shifted  32.0% | reservoir 398 | hijacker idx 0.11 | L2 spikes/presentation   9.0 from  1.2 distinct neurons (last batch) | L1 spikes/presentation  60.6 |  34.4 min
+[layer 2]  115232 ex | held-out acc  49.3% shifted  34.3% | reservoir 395 | hijacker idx 0.11 | L2 spikes/presentation   9.1 from  1.1 distinct neurons (last batch) | L1 spikes/presentation  62.0 |  35.4 min
+[layer 2]  118432 ex | held-out acc  52.8% shifted  33.9% | reservoir 394 | hijacker idx 0.10 | L2 spikes/presentation   8.8 from  1.2 distinct neurons (last batch) | L1 spikes/presentation  60.4 |  36.4 min
+Training complete
+
+run finished in 36.9 min | final acc 51.2% shifted 33.4% | spike time none | /home/csigrist_umass_edu/SNN/new_architecture_testing/snn_multi_layered_unshared/results/unshared_p7s7f16_n400_tp0.5_nodecay_ep2_seed0_l1wta_l2wta_20261102-183156
+end Mon Nov  2 07:12:43 PM UTC 2026

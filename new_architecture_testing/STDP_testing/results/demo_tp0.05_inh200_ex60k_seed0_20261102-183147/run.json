@@ -1,0 +1,29 @@
+{
+  "theta_plus": 0.05,
+  "theta_tau": null,
+  "inhibition": 200.0,
+  "neurons": 400,
+  "examples": 60000,
+  "raster_at": "3200,32000",
+  "watch_from": 20000,
+  "n_recruits": 6,
+  "track_batches": 300,
+  "inbatch_batches": 3,
+  "frame_every": 50,
+  "win_spikes": 15,
+  "seed": 0,
+  "steps": 350,
+  "tag": "",
+  "smoke": false,
+  "replot": null,
+  "run_name": "demo_tp0.05_inh200_ex60k_seed0_20261102-183147",
+  "raster_at_list": [
+    3200,
+    32000
+  ],
+  "device": "cuda",
+  "n_rasters": 2,
+  "n_recruits_found": 6,
+  "minutes": 9.876331373055775,
+  "examples_run": 60000
+}
