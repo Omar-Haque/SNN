@@ -1,0 +1,73 @@
+{
+  "arm": "baseline",
+  "n_refill": 0,
+  "intervention_at": null,
+  "seed": 0,
+  "num_epochs": 2,
+  "num_steps": 350,
+  "snapshot_interval": 100,
+  "batch_size": 32,
+  "smoke": false,
+  "tag": "",
+  "run_name": "noreserve_uniform_tp0.05_nodecay_ph0-4+5-9_ep2_seed0_20261027-003730",
+  "sweep": true,
+  "init": "uniform",
+  "theta_init": null,
+  "theta_plus_arg": 0.05,
+  "inhibition_arg": 200.0,
+  "theta_tau": null,
+  "theta_max": null,
+  "anneal_at": null,
+  "theta_plus_late": null,
+  "test3": true,
+  "phases": "0-4,5-9",
+  "phase_classes": [
+    [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    [
+      5,
+      6,
+      7,
+      8,
+      9
+    ]
+  ],
+  "phase_epochs": 2,
+  "phase_sizes": [
+    30596,
+    29404
+  ],
+  "reserve": 0,
+  "replenish": false,
+  "reserve_delay_ms": 10.0,
+  "reserve_theta": "pin",
+  "reserve_idx_init": [],
+  "intervention_step_actual": null,
+  "intervention_info": null,
+  "spike_time": NaN,
+  "untrained_threshold": 0.35,
+  "top_k": 100,
+  "theta_base": -52.0,
+  "theta_plus": 0.05,
+  "theta_decay_tc": 10000000.004863936,
+  "inhibition_mV": 200.0,
+  "lr_plus": 0.01,
+  "lr_minus": 0.0001,
+  "num_neurons": 400,
+  "device": "mps",
+  "minutes": 26.29992574850718,
+  "imprint_labels": null,
+  "anneal_step_actual": null,
+  "phase_boundaries": [
+    61192
+  ],
+  "n_reserve_recruits": 0,
+  "n_recycled": 0,
+  "reserve_final": 0,
+  "theta_tau_steps": 10000000.004863936
+}
