@@ -11,3 +11,6 @@ temp/
 
 # Ignore unity
 # unity/
+
+# Ignore venv
+venv/

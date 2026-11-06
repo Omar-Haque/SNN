@@ -1,0 +1,1 @@
+/home/csigrist_umass_edu/SNN/venv/bin/python snn_exp.py --name vt_t250 --results_dir results_wta_n100 --inh 17.5 --n_neurons 100 --epochs 3 --batch_size 32 --theta_plus 0.05 --theta_div 16 --refrac 0 --lr_scale 1.0 --intensity 0.1 --seed 0 --snapshot_interval 50 --num_steps 250 --wta_mode vt
