@@ -166,7 +166,8 @@ def make_run_figures(run_dir):
 
     # ---- F2 reservoir -----------------------------------------------------------------------------------
     fig, ax = plt.subplots(figsize=(10, 5.5))
-    ax.plot(pts, d['reservoir_count'], color='black', linewidth=2, label='untrained neurons (top-100 share < 0.35)')
+    ax.plot(pts, d['reservoir_count'], color='black', linewidth=2, label=f"untrained neurons (top-{cfg.get('top_k', 100)} share < 0.35; capped for sparse inputs)")
+    if 'reservoir_init' in d: ax.plot(pts, d['reservoir_init'], color='black', linewidth=1.5, linestyle='--', label='rows that have not moved from their initialisation (cosine > 0.95)')
     ax.set_ylabel('Untrained neurons (reservoir)'); ax.set_xlabel('Number of training examples'); ax.grid(True, linestyle='--', alpha=0.5)
     ax2 = ax.twinx(); ax2.plot(pts, acc, color='blue', alpha=0.35, linewidth=1.5, label='held-out accuracy'); ax2.set_ylabel('Accuracy (%)', color='blue')
     _vlines(ax, cfg, spike_time)
@@ -329,8 +330,10 @@ def make_run_figures(run_dir):
         if 'l1_points' in d and len(d['l1_points']):
             lp = d['l1_points']
             fig, axes = plt.subplots(2, 3, figsize=(18, 7.5)); (a1, a2, a5), (a3, a4, a6) = axes
-            a1.plot(lp, d['l1_reservoir'], color='black', linewidth=2); a1.set_ylabel('flat templates (top-k share < 0.35)'); a1.set_title('Layer-1 reservoir', loc='left', fontweight='bold')
-            sh = d['l1_sharp']
+            has_struct = 'l1_struct' in d
+            a1.plot(lp, d['l1_reservoir'], color='black', linewidth=2); a1.set_ylabel('unstructured templates (1-px autocorrelation < 0.4)' if has_struct else 'flat templates (top-k share < 0.35)')
+            a1.set_title('Layer-1 reservoir' + ('' if has_struct else ' (old criterion: bands look flat)'), loc='left', fontweight='bold')
+            sh = d['l1_struct'] if has_struct else d['l1_sharp']
             a2.plot(lp, d['l1_theta_med'], color='tab:blue', linewidth=2, label='median θ'); a2.plot(lp, d['l1_theta_p90'], color='tab:blue', linewidth=1, linestyle='--', label='p90 θ')
             a2.axhline(-52, color='gray', linewidth=0.8); a2.set_ylabel('θ (mV)'); a2.legend(fontsize=8); a2.set_title('Layer-1 thresholds', loc='left', fontweight='bold')
             us = d['l1_usage']; us = us / np.maximum(us.sum(1, keepdims=True), 1e-9)
@@ -352,10 +355,10 @@ def make_run_figures(run_dir):
             side = int(cfg['l1']['side']) if cfg.get('l1') and cfg['l1'].get('side') else int(round(np.sqrt(sh.shape[1] / cfg.get('features', 16))))
             F_ = sh.shape[1] // (side * side)
             grid = sh[-1].reshape(side, side, F_).max(2)
-            im = a6.imshow(grid, cmap='viridis', vmin=0.1, vmax=max(0.6, float(grid.max()))); fig.colorbar(im, ax=a6, fraction=0.046)
+            im = a6.imshow(grid, cmap='viridis', vmin=0.0 if has_struct else 0.1, vmax=1.0 if has_struct else max(0.6, float(grid.max()))); fig.colorbar(im, ax=a6, fraction=0.046)
             for yy in range(side):
                 for xx in range(side): a6.text(xx, yy, f"{grid[yy, xx]:.2f}", ha='center', va='center', fontsize=6.5, color='white' if grid[yy, xx] < 0.45 else 'black')
-            a6.set_title('Sharpest template per window (max top-k share)', loc='left', fontweight='bold', fontsize=10); a6.set_xticks([]); a6.set_yticks([])
+            a6.set_title('Most structured template per window (max ' + ('1-px autocorrelation)' if has_struct else 'top-k share)'), loc='left', fontweight='bold', fontsize=10); a6.set_xticks([]); a6.set_yticks([])
             for ax in (a3, a4, a5): ax.set_xlabel('Layer-1 training examples')
             for ax in (a1, a2, a3, a4, a5): ax.grid(True, linestyle='--', alpha=0.5)
             if cfg.get('l1') and cfg['l1'].get('frozen_at'):

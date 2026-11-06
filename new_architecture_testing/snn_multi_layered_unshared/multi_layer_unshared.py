@@ -402,6 +402,23 @@ def template_sharpness(W: torch.Tensor, k: int) -> torch.Tensor:
     return Wc.topk(k, dim=1).values.sum(dim=1) / Wc.sum(dim=1)
 
 
+def template_structure(W: torch.Tensor, side: int) -> torch.Tensor:
+    """Spatial structure of each side x side template: the 1-pixel autocorrelation of the mean-centred template (average of
+    the vertical and horizontal shifts). A random template scores ~0 (p95 ≈ 0.16); a learned stroke band scores 0.5-0.9.
+    This replaces the top-k share for layer 1: a stroke band 3-4 px wide covers ~20 of 49 pixels, so its top-6 share can never
+    reach the 0.35 that marks a trained pixel template, which made every band look "flat"."""
+    T = W.detach().float().cpu().view(-1, side, side); T = T - T.mean(dim=(1, 2), keepdim=True)
+    def cos(a, b): return (a * b).sum(dim=(1, 2)) / ((a * a).sum(dim=(1, 2)).sqrt() * (b * b).sum(dim=(1, 2)).sqrt() + 1e-12)
+    return 0.5 * (cos(T[:, 1:, :], T[:, :-1, :]) + cos(T[:, :, 1:], T[:, :, :-1]))
+
+
+def cosine_to_init(W: torch.Tensor, W_init: torch.Tensor) -> torch.Tensor:
+    """Cosine between each row and the row it started from: 1.0 = never changed. Criterion-free 'has this neuron learned',
+    for inputs (the layer-1 code) whose sparsity caps the top-k share far below the pixel-template value."""
+    a = W.detach().float(); b = W_init.detach().float().to(a.device)
+    return ((a * b).sum(1) / (a.norm(dim=1) * b.norm(dim=1) + 1e-12)).cpu()
+
+
 def shifted_test_set(n: int, shift: int, seed: int = 1234) -> TensorDataset:
     """The first n test images, each translated by a fixed random (dx, dy) in [-shift, shift]^2 (zero fill)."""
     g = np.random.default_rng(seed)
@@ -423,7 +440,7 @@ def train_layer1(model: TwoLayerNetwork, loader: DataLoader, device: torch.devic
     l1 = model.l1; assert l1 is not None
     num_steps = cfg["num_steps"]; snap_every = cfg["l1_snapshot"]; max_examples = cfg["l1_examples"]
     k1 = max(3, int(round(l1.K / 7.84)))
-    hist = {"points": [], "sharp": [], "theta_med": [], "theta_p90": [], "usage": [], "dW": [], "active_frac": [], "latency": [], "reservoir": [],
+    hist = {"points": [], "sharp": [], "struct": [], "theta_med": [], "theta_p90": [], "usage": [], "dW": [], "active_frac": [], "latency": [], "reservoir": [],
             "distinct": [], "tie": [], "spikes_per_window": []}   # per active window: distinct features that fired, features in its first spiking ms, spikes
     W_prev = l1.templates().clone()
     usage = torch.zeros(l1.F, device=device)             # spikes per feature since the last snapshot
@@ -453,25 +470,25 @@ def train_layer1(model: TwoLayerNetwork, loader: DataLoader, device: torch.devic
         distinct_sum += float((cnt[act] > 0).sum(1).float().sum()); tie_sum += float(first_group[act].sum()); spk_sum += float(cnt[act].sum())
         seen += B; batch_i += 1
         if batch_i % snap_every == 0:
-            W = l1.templates(); sharp = template_sharpness(W, k1).numpy()
+            W = l1.templates(); sharp = template_sharpness(W, k1).numpy(); struct = template_structure(W, l1.patch).numpy()
             dW = torch.linalg.norm((W - W_prev).float().cpu(), dim=1).numpy(); W_prev = W.clone()
             th = l1.theta.detach().float().cpu().numpy()
-            res = int((sharp < 0.35).sum())
-            hist["points"].append(seen); hist["sharp"].append(sharp.astype(np.float32)); hist["dW"].append(dW.astype(np.float32))
+            res = int((struct < 0.4).sum())                      # unstructured templates (windows that never see ink stay here)
+            hist["points"].append(seen); hist["sharp"].append(sharp.astype(np.float32)); hist["struct"].append(struct.astype(np.float32)); hist["dW"].append(dW.astype(np.float32))
             hist["theta_med"].append(float(np.median(th))); hist["theta_p90"].append(float(np.percentile(th, 90)))
             hist["usage"].append((usage / max(1, snap_every * B)).cpu().numpy().astype(np.float32))   # spikes per example, per feature
             hist["active_frac"].append(n_windows_fired / max(1, n_windows_ink)); hist["latency"].append(lat_sum / max(1, n_windows_fired))
             hist["reservoir"].append(res)
             nf = max(1, n_windows_fired)
             hist["distinct"].append(distinct_sum / nf); hist["tie"].append(tie_sum / nf); hist["spikes_per_window"].append(spk_sum / nf)
-            print(f"[layer 1] {seen:>6d} ex | flat templates {res:3d}/{len(sharp)} | sharp med {np.median(sharp):.2f} | θ med {np.median(th):6.1f} p90 {np.percentile(th, 90):6.1f} | "
+            print(f"[layer 1] {seen:>6d} ex | unstructured templates {res:3d}/{len(sharp)} | structure med {np.median(struct):.2f} | θ med {np.median(th):6.1f} p90 {np.percentile(th, 90):6.1f} | "
                   f"windows fired {100 * hist['active_frac'][-1]:4.0f}% latency {hist['latency'][-1]:5.1f} ms | per active window: {hist['spikes_per_window'][-1]:4.1f} spikes from "
                   f"{hist['distinct'][-1]:4.1f} features, {hist['tie'][-1]:4.1f} in its first spiking ms | ‖ΔW‖ max {dW.max():.2f} | {(time.time() - t0) / 60:4.1f} min")
             usage.zero_(); n_windows_ink = n_windows_fired = 0; lat_sum = 0.0; distinct_sum = tie_sum = spk_sum = 0.0
             if res == 0 and converged_at is None: converged_at = seen
             if (cfg["l1_stop_stationary"] and len(hist["reservoir"]) >= 6 and hist["reservoir"][-1] >= hist["reservoir"][-6]
                     and abs(hist["theta_med"][-1] - hist["theta_med"][-6]) < 0.3):
-                print(f"[layer 1] stationary: the reservoir has not shrunk for 5 snapshots ({res} flat templates left, mostly windows that never see ink) "
+                print(f"[layer 1] stationary: the reservoir has not shrunk for 5 snapshots ({res} unstructured templates left, mostly windows that never see ink) "
                       f"and the median theta moved < 0.3 mV -> freezing at {seen} examples"); break
         if seen >= max_examples: break
     model.learn_l1 = False   # FREEZE
@@ -518,7 +535,7 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
     P, A, S, R, H, C, L = [], [], [], [], [], [], []             # points, acc, shifted acc, reservoir, hijack, conf, assignments
     WS, TH, SH, RC, L1U = [], [], [], [], []                       # window spikes, theta, sharpness, recruit steps, layer-1 usage
     recruit_step = np.full(n, np.nan)
-    W_prev = model.l2.synapses.weight.detach().clone()
+    W_prev = model.l2.synapses.weight.detach().clone(); W_init = W_prev.clone(); CI, RI = [], []   # cosine to the initial row per snapshot, reservoir by that criterion
     spikes_since = torch.zeros(n, device=device); l1_usage = torch.zeros(model.l1.F, device=device) if model.l1 is not None else None
     total = 0; gbi = 0; t0 = time.time()
     model.learn_l1 = False; model.learn_l2 = True
@@ -545,13 +562,14 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
                     ws = spikes_since.cpu().numpy().copy(); spikes_since.zero_()
                 newly = (sharp >= 0.35) & np.isnan(recruit_step); recruit_step[newly] = total
                 res = int((sharp < 0.35).sum())
+                ci = cosine_to_init(W, W_init).numpy(); res_init = int((ci > 0.95).sum()); CI.append(ci.astype(np.float32)); RI.append(res_init)
                 P.append(total); A.append(float(acc)); S.append(float(acc_s)); R.append(res); H.append(hij)
                 C.append(np.asarray(cm).astype(np.int32)); L.append(labels.cpu().numpy().astype(np.int16))
                 WS.append(ws.astype(np.float32)); TH.append(th.astype(np.float32)); SH.append(sharp.astype(np.float32)); RC.append(recruit_step.copy())
                 if l1_usage is not None: L1U.append(l1_usage.cpu().numpy().astype(np.float32)); l1_usage.zero_()
                 distinct = float((bts > 0).sum(dim=1).float().mean())
                 l1_rate = (float(L1U[-1].sum()) / max(1, snapshot_interval * B)) if L1U else float("nan")
-                print(f"[layer 2] {total:>7d} ex | held-out acc {acc:5.1f}% shifted {acc_s:5.1f}% | reservoir {res:3d} | hijacker idx {hij:4.2f} | "
+                print(f"[layer 2] {total:>7d} ex | held-out acc {acc:5.1f}% shifted {acc_s:5.1f}% | reservoir {res:3d} (unmoved rows {res_init:3d}, cos-to-init med {np.median(ci):.2f}) | hijacker idx {hij:4.2f} | "
                       f"L2 spikes/presentation {ws.sum() / max(1, snapshot_interval * B):5.1f} from {distinct:4.1f} distinct neurons (last batch) | L1 spikes/presentation {l1_rate:5.1f} | {(time.time() - t0) / 60:5.1f} min")
             gbi += 1
     print("Training complete")
@@ -571,10 +589,11 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
                reservoir_count=np.array(R), hijack_index=np.array(H), window_spikes=np.array(WS), theta_snap=np.array(TH), sharp_snap=np.array(SH),
                assignments_snap=np.array(L), conf_snap=np.array(C), recruit_step_snap=np.array(RC),
                imprinted=np.zeros(n, bool), refilled=np.zeros(n, bool),
+               cos_init_snap=np.array(CI), reservoir_init=np.array(RI), W2_init=W_init.float().cpu().numpy().astype(np.float16),
                W2=model.l2.synapses.weight.detach().float().cpu().numpy().astype(np.float16))
     if model.l1 is not None and l1_hist is not None:
         npz.update(W1=model.l1.templates().float().cpu().numpy().astype(np.float32), l1_theta=model.l1.theta.detach().float().cpu().numpy().astype(np.float32),
-                   l1_usage_snap=np.array(L1U), l1_points=np.array(l1_hist["points"]), l1_sharp=np.array(l1_hist["sharp"]), l1_dW=np.array(l1_hist["dW"]),
+                   l1_usage_snap=np.array(L1U), l1_points=np.array(l1_hist["points"]), l1_sharp=np.array(l1_hist["sharp"]), l1_struct=np.array(l1_hist["struct"]), l1_dW=np.array(l1_hist["dW"]),
                    l1_theta_med=np.array(l1_hist["theta_med"]), l1_theta_p90=np.array(l1_hist["theta_p90"]), l1_usage=np.array(l1_hist["usage"]),
                    l1_active_frac=np.array(l1_hist["active_frac"]), l1_latency=np.array(l1_hist["latency"]), l1_reservoir=np.array(l1_hist["reservoir"]),
                    l1_distinct=np.array(l1_hist["distinct"]), l1_tie=np.array(l1_hist["tie"]), l1_spikes_per_window=np.array(l1_hist["spikes_per_window"]))
@@ -602,6 +621,7 @@ def main() -> None:
     p.add_argument("--neurons", type=int, default=400); p.add_argument("--theta-plus", type=float, default=0.5); p.add_argument("--theta-tau", type=float, default=None)
     p.add_argument("--inhibition", type=float, default=200.0)
     p.add_argument("--l2-wta", action="store_true", help="hard winner-take-all per timestep in layer 2 (resolves simultaneous crossings caused by layer 1's synchronous bursts); off = baseline behaviour")
+    p.add_argument("--l1-readout-inhibition", type=float, default=None, help="after stage A, run layer 1 with this within-window inhibition (mV) for layer-2 training and evaluation instead of --l1-inhibition; e.g. 17.5 lets a runner-up feature fire too, so codes of two instances of a class overlap more")
     p.add_argument("--l1-wta", action="store_true", help="within-window tie-break in layer 1: when several features of a window cross threshold in the same step, only the highest fires; off = baseline behaviour")
     p.add_argument("--l2-drive", type=float, default=1.2, help="initial drive (mV/ms) a flat layer-2 neuron should receive; layer 2's weight scale is calibrated from layer 1's measured output rate to give this")
     p.add_argument("--l2-norm", type=float, default=None, help="override the calibrated row sum"); p.add_argument("--l2-wmax", type=float, default=None, help="override the calibrated w_max")
@@ -647,6 +667,7 @@ def main() -> None:
     variant = "singlelayer" if args.no_l1 else (f"{'shared' if args.shared else 'unshared'}_p{args.patch}s{args.stride}f{args.features}" + ("_pool2" if args.pool2 else ""))
     run_name = f"{variant}_n{args.neurons}_tp{args.theta_plus:g}" + (f"_tau{args.theta_tau / 1000:g}k" if args.theta_tau else "_nodecay") + f"_ep{args.epochs}_seed{args.seed}"
     if args.l1_wta: run_name += "_l1wta"
+    if args.l1_readout_inhibition is not None and not args.no_l1: run_name += f"_rd{args.l1_readout_inhibition:g}"
     if args.l2_wta: run_name += "_l2wta"
     if args.tag: run_name += f"_{args.tag}"
     if args.smoke: run_name += "_SMOKE"
@@ -655,13 +676,16 @@ def main() -> None:
     cfg = {"arm": "baseline", "sweep": True, "multi": True, "seed": args.seed, "num_epochs": args.epochs, "num_steps": args.steps, "snapshot_interval": args.snapshot_interval,
            "batch_size": 32, "smoke": bool(args.smoke), "tag": args.tag, "run_name": run_name, "init": "uniform", "theta_init": None, "theta_tau": args.theta_tau,
            "theta_plus_arg": args.theta_plus, "inhibition_arg": args.inhibition, "theta_max": None, "anneal_at": None, "theta_plus_late": None,
-           "l2_wta": bool(args.l2_wta), "l1_wta": bool(args.l1_wta), "no_l1": bool(args.no_l1), "patch": args.patch, "stride": args.stride, "features": args.features, "shared": bool(args.shared), "pool2": bool(args.pool2),
+           "l2_wta": bool(args.l2_wta), "l1_wta": bool(args.l1_wta), "l1_readout_inhibition": args.l1_readout_inhibition, "no_l1": bool(args.no_l1), "patch": args.patch, "stride": args.stride, "features": args.features, "shared": bool(args.shared), "pool2": bool(args.pool2),
            "l1_theta_plus": args.l1_theta_plus, "l1_theta_tau": args.l1_theta_tau, "l1_theta_shared": bool(args.l1_theta_shared), "l1_norm": args.l1_norm, "l1_wmax": args.l1_wmax,
            "l1_inhibition": args.l1_inhibition, "l1_stdp_reduce": args.l1_stdp_reduce, "l1_examples": args.l1_examples, "l1_snapshot": args.l1_snapshot,
            "l1_stop_stationary": bool(args.l1_stop_stationary), "l2_inputs": n_in, "l2_norm": l2_norm, "l2_wmax": l2_wmax, "shift": args.shift}
     print("config:", json.dumps(cfg))
     l1_hist = train_layer1(model, l1_loader, device, cfg) if l1 is not None else None
     if l1 is not None:
+        if args.l1_readout_inhibition is not None:
+            model.l1.inhibition = float(args.l1_readout_inhibition)      # learning is frozen; only the readout competition changes (calibration below sees it)
+            print(f"[layer 1] readout: within-window inhibition set to {model.l1.inhibition:g} mV for stage B and evaluation (was {args.l1_inhibition:g} during learning)")
         cal = calibrate_layer2(model, l1_loader, device, args.steps, args.l2_drive)
         if args.l2_norm is not None or args.l2_wmax is not None:      # explicit overrides win
             l2 = model.l2

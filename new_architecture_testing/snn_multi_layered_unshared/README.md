@@ -40,6 +40,10 @@ neurons.
 - F15 (stage A curves), F14 (the 16 templates at four windows: strokes, not blobs), F1 (held-out and shifted
   accuracy), F13 (layer-2 templates projected to image space), `summary.csv` / S1 / S2.
 
+## Diagnostics
+- `replay_layer1.py results/<run> [--inhibition X --no-wta --pooling]`: torch-free replay of the frozen layer 1 on test digits —
+  code sparsity, within- vs between-class similarity (against raw pixels), nearest-centroid accuracy, pooled variants.
+
 ## Run
 ```bash
 cd new_architecture_testing/snn_multi_layered_unshared
@@ -76,3 +80,40 @@ The fix is a within-step tie-break, which BindsNET's `DiehlAndCookNodes` applies
 crossing neuron per step, chosen at random); ours keeps the crossing neuron with the highest potential, as in the
 WTA block of the original code: `--l1-wta` (per window) and `--l2-wta` (layer 2).
 The 20-most-active templates in F13 of run 1 are not useless — they vote at 70 % — but they are averages, not imprints.
+
+**Batch 1 on Unity (2026-11-02, tie-break in both layers, 2 epochs, no θ decay)** — `summary.csv`:
+
+| run | held-out | shifted (2 px) |
+|---|---|---|
+| single-layer reference, `--no-l1 --l2-wta` | 86.8 | 60.6 |
+| two-layer, `--l1-wta --l2-wta`, seeds 0 / 1 | 68.9 / 67.8 | 41.3 / 43.7 |
+| `--l2-wta` only | 68.6 | 44.4 |
+| `--features 32` | 68.7 | 45.6 |
+| `--pool2` | 65.9 | 41.9 |
+| `--stride 7` (disjoint windows) | 52.8 | 33.9 |
+
+What the batch established, in order:
+
+1. *Layer 1 works.* With the tie-break, exactly one feature fires per active window (D = T = 1.00 in the stage-A log), and
+   every central window learned 16 distinct oriented stroke bands (F14). The old "flat templates" count (898/1024) was the
+   top-6 share applied to bands 20 pixels wide; by spatial structure (1-px autocorrelation, now the criterion) 100 % of the
+   central-window templates and 88 % of the ring are formed, and the remainder are windows that never see ink.
+2. *The layer-1 code is better than pixels for a template matcher.* `replay_layer1.py` on 1,000 test digits: a
+   nearest-class-centroid classifier gets 87.0 % on the code vs 82.0 % on raw pixels; within-class vs between-class
+   contrast is 3.6x (Jaccard) / 4.0x (rate cosine) vs 1.5x for pixels. Softer readouts do not add information (17.5 mV:
+   86.3 %; no inhibition: 80.0 %), nor does pooling (82–84 %).
+3. *The D&C layer learns that code slowly* — 54 % at 29k examples where the pixel layer is at 82 %, then a logarithmic
+   climb (64 % at 67k, 69 % at 118k, still rising 3–5 points per quarter-run). Its dynamics are matched to the single layer
+   (spikes per presentation 26 → 7 in both, same θ climb, w_max/mean and norm scaled identically), so the input statistics
+   are the only difference, and they differ in the one quantity the learning loop depends on: two instances of a class share
+   ~15 % of their active channels (37 of 1,024), where in pixel space they share most of their ink. A neuron imprints the
+   single instance it won and is barely favoured for the next one, so recruitment is a lottery and templates become diffuse
+   unions (top-131 share ≤ 0.3 — also why the layer-2 "reservoir" never empties: with the calibrated w_max a 37-channel
+   template cannot exceed ~0.42, so that criterion is replaced by the cosine to the initial row, `reservoir_init`).
+4. pool2's falling reservoir count is pooled codes being more consistent, not accuracy: it is the variant that flattened.
+
+**Batch 2 (queued 2026-11-06, `unity/submit_multi_layer.sh`)** tests that explanation: 6 epochs with layer-2 θ decay
+τ 30k (control: time alone, with θ stationary instead of climbing past +30 mV); `--features 8` and `4` (coarser partition
+per window, so the same stroke maps to the same channel more often); `--l1-readout-inhibition 17.5` (features learned at
+200 mV, read out with a runner-up allowed: +50 % within-class overlap at 2.5x contrast in the replay); and the single-layer
+reference in the same regime.

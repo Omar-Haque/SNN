@@ -21,6 +21,9 @@ def label(cfg):
     else: lab = f"{'shared' if cfg.get('shared') else 'unshared'} {cfg['patch']}x{cfg['patch']}/{cfg['stride']} F{cfg['features']}" + (" pool2" if cfg.get("pool2") else "")
     lab += f" n{cfg.get('num_neurons', 400)}" if cfg.get("num_neurons", 400) != 400 else ""
     lab += f" τ{cfg['theta_tau'] / 1000:g}k" if cfg.get("theta_tau") else ""
+    lab += f" rd{cfg['l1_readout_inhibition']:g}" if cfg.get("l1_readout_inhibition") is not None and not cfg.get("no_l1") else ""
+    lab += " wta" if cfg.get("l1_wta") or cfg.get("l2_wta") else ""
+    lab += f" ep{cfg['num_epochs']}" if cfg.get("num_epochs", 2) != 2 else ""
     return lab
 
 def main():
@@ -35,7 +38,9 @@ def main():
         ws = d["window_spikes"]; spp = float(ws[-1].sum() / (cfg["snapshot_interval"] * cfg["batch_size"]))
         rows.append({"run": r.name, "variant": label(cfg), "seed": cfg["seed"], "l1_converged": l1.get("converged_at"), "l1_frozen_at": l1.get("frozen_at"),
                      "final_acc": float(np.mean(acc[-3:])), "final_shifted": float(np.nanmean(sh[-3:])), "shift_drop": float(np.mean(acc[-3:]) - np.nanmean(sh[-3:])),
-                     "t78": spike_time_from_curve(pts, acc, 78.0), "max_acc": float(acc.max()), "spikes_per_presentation": spp, "minutes": cfg.get("minutes", float("nan")),
+                     "t78": spike_time_from_curve(pts, acc, 78.0), "max_acc": float(acc.max()), "spikes_per_presentation": spp,
+                     "unmoved_rows_end": int(d["reservoir_init"][-1]) if "reservoir_init" in d else None,
+                     "cos_init_median_end": float(np.median(d["cos_init_snap"][-1])) if "cos_init_snap" in d else None, "minutes": cfg.get("minutes", float("nan")),
                      "_pts": pts, "_acc": acc, "_sh": sh})
     if not rows: print("no finished runs"); return
     rows.sort(key=lambda r: (r["variant"], r["seed"]))
