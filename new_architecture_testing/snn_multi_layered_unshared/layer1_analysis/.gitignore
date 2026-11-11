@@ -1,0 +1,4 @@
+cache/codes_*.npy
+cache/eval_*.npz
+cache/l1_smoke.npz
+__pycache__/

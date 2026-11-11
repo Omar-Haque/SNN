@@ -43,6 +43,12 @@ squeue --me                               # state; PD = waiting, R = running
 tail -f unity/logs/<name>-<jobid>.out     # the console output you normally watch
 scancel <jobid>
 ```
+GPU generations: the setup script installs the CUDA 12.6 PyTorch build on purpose — the default build has no kernels for
+the older cards (GTX TITAN X, 1080 Ti, V100) that make up much of `gpu-preempt`, and fails with "no kernel image is
+available for execution on the device". If you ever see that again: `pip install torch torchvision --index-url
+https://download.pytorch.org/whl/cu126` inside the `snn` env, or restrict jobs to newer cards with
+`--constraint=sm_75|sm_80|sm_86|sm_89|sm_90` (longer queue).
+
 Partitions: `gpu-preempt` for anything under 2 h (shortest wait; a preempted job is killed, and these scripts do not
 checkpoint, so resubmit), `gpu` for longer runs (up to 48 h). Replotting/summaries are light enough for the login node.
 
