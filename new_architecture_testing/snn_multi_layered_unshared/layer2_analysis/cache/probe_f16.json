@@ -1,0 +1,13 @@
+{
+ "run": "unshared_p7s3f16_n400_tp0.5_tau30k_ep6_seed0_l",
+ "first_l2_spike_ms_median": 30.0,
+ "input_spikes_before_decision_median": 12.0,
+ "input_spikes_whole_presentation_median": 301.5,
+ "channels_reported_before_decision_median": 12.0,
+ "channels_active_whole_presentation_median": 38.0,
+ "fraction_of_active_channels_reported": 0.3333333333333333,
+ "mV_delivered_to_winner_before_its_first_spike_median": 78.2255859375,
+ "winner_threshold_distance_median_mV": 70.0607681274414,
+ "largest_single_input_weight_median_mV": 10.125,
+ "weights_above_half_wmax_per_neuron_median": 27.0
+}

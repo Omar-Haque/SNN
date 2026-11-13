@@ -1,0 +1,25 @@
+{
+ "tag": "unshared_p7s3f16_n400_tp0.5_tau30k_ep6_seed0",
+ "spiking": 65.5,
+ "best_drive": 73.9,
+ "best_cosine": 76.1,
+ "race": 70.7,
+ "spiking_winner_is_best_drive": 38.0,
+ "spiking_winner_is_race_winner": 48.4,
+ "spiking_winner_drive_rank_median": 1.0,
+ "win_purity": 0.811,
+ "neurons_winning": 387,
+ "drive_best_over_median": 3.871058940887451,
+ "drive_best_over_second": 1.0564944744110107,
+ "theta_p10_p50_p90": [
+  -14.277933120727539,
+  0.3673515319824219,
+  19.67364501953125
+ ],
+ "code_spikes_per_image": 314.24700927734375,
+ "l2_spikes_per_image": 21.72100067138672,
+ "silent_test_images": 0,
+ "template_cos_to_best_class_centroid": 0.7351694107055664,
+ "template_margin_over_second_class": 0.16521033644676208,
+ "weight_share_top5pct_inputs": 0.2674800157546997
+}

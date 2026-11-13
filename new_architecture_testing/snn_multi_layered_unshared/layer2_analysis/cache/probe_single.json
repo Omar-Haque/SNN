@@ -1,0 +1,13 @@
+{
+ "run": "singlelayer_n400_tp0.5_tau30k_ep6_seed0_l2wta_",
+ "first_l2_spike_ms_median": 17.0,
+ "input_spikes_before_decision_median": 163.0,
+ "input_spikes_whole_presentation_median": 3244.0,
+ "channels_reported_before_decision_median": 89.0,
+ "channels_active_whole_presentation_median": 137.0,
+ "fraction_of_active_channels_reported": 0.6459115687462145,
+ "mV_delivered_to_winner_before_its_first_spike_median": 68.23037719726562,
+ "winner_threshold_distance_median_mV": 61.292083740234375,
+ "largest_single_input_weight_median_mV": 0.505859375,
+ "weights_above_half_wmax_per_neuron_median": 2.0
+}

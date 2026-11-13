@@ -625,6 +625,7 @@ def main() -> None:
     p.add_argument("--l1-wta", action="store_true", help="within-window tie-break in layer 1: when several features of a window cross threshold in the same step, only the highest fires; off = baseline behaviour")
     p.add_argument("--l2-drive", type=float, default=1.2, help="initial drive (mV/ms) a flat layer-2 neuron should receive; layer 2's weight scale is calibrated from layer 1's measured output rate to give this")
     p.add_argument("--l2-norm", type=float, default=None, help="override the calibrated row sum"); p.add_argument("--l2-wmax", type=float, default=None, help="override the calibrated w_max")
+    p.add_argument("--l2-lr-mult", type=float, default=1.0, help="multiply layer 2's STDP learning rates (lr+ 1e-2, lr- 1e-4) by this factor; 1 = baseline behaviour")
     # ---- run control ----
     p.add_argument("--epochs", type=int, default=2); p.add_argument("--shift", type=int, default=2, help="max |dx|,|dy| of the shifted test set (0 = none)")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--steps", type=int, default=350); p.add_argument("--snapshot-interval", type=int, default=100)
@@ -662,6 +663,7 @@ def main() -> None:
         l2_norm = args.l2_norm or 0.1 * n_in; l2_wmax = args.l2_wmax or 1.0     # provisional; replaced by the calibration after stage A unless overridden
     tau2 = 1e7 if args.theta_tau is None else args.theta_tau * args.steps / 32
     l2 = DiehlAndCookNetwork(n_in, args.neurons, args.theta_plus, args.inhibition, tau2, None, l2_norm, l2_wmax, wta=bool(args.l2_wta))
+    l2.lr_plus *= args.l2_lr_mult; l2.lr_minus *= args.l2_lr_mult      # both rates together, so the potentiation/depression ratio is unchanged
     model = TwoLayerNetwork(l1, l2, args.pool2).to(device)
 
     variant = "singlelayer" if args.no_l1 else (f"{'shared' if args.shared else 'unshared'}_p{args.patch}s{args.stride}f{args.features}" + ("_pool2" if args.pool2 else ""))
@@ -669,6 +671,8 @@ def main() -> None:
     if args.l1_wta: run_name += "_l1wta"
     if args.l1_readout_inhibition is not None and not args.no_l1: run_name += f"_rd{args.l1_readout_inhibition:g}"
     if args.l2_wta: run_name += "_l2wta"
+    if args.l2_drive != 1.2 and not args.no_l1: run_name += f"_drv{args.l2_drive:g}"
+    if args.l2_lr_mult != 1.0: run_name += f"_lr{args.l2_lr_mult:g}"
     if args.tag: run_name += f"_{args.tag}"
     if args.smoke: run_name += "_SMOKE"
     run_name += "_" + time.strftime("%Y%m%d-%H%M%S")
@@ -676,7 +680,7 @@ def main() -> None:
     cfg = {"arm": "baseline", "sweep": True, "multi": True, "seed": args.seed, "num_epochs": args.epochs, "num_steps": args.steps, "snapshot_interval": args.snapshot_interval,
            "batch_size": 32, "smoke": bool(args.smoke), "tag": args.tag, "run_name": run_name, "init": "uniform", "theta_init": None, "theta_tau": args.theta_tau,
            "theta_plus_arg": args.theta_plus, "inhibition_arg": args.inhibition, "theta_max": None, "anneal_at": None, "theta_plus_late": None,
-           "l2_wta": bool(args.l2_wta), "l1_wta": bool(args.l1_wta), "l1_readout_inhibition": args.l1_readout_inhibition, "no_l1": bool(args.no_l1), "patch": args.patch, "stride": args.stride, "features": args.features, "shared": bool(args.shared), "pool2": bool(args.pool2),
+           "l2_lr_mult": args.l2_lr_mult, "l2_drive_arg": args.l2_drive, "l2_wta": bool(args.l2_wta), "l1_wta": bool(args.l1_wta), "l1_readout_inhibition": args.l1_readout_inhibition, "no_l1": bool(args.no_l1), "patch": args.patch, "stride": args.stride, "features": args.features, "shared": bool(args.shared), "pool2": bool(args.pool2),
            "l1_theta_plus": args.l1_theta_plus, "l1_theta_tau": args.l1_theta_tau, "l1_theta_shared": bool(args.l1_theta_shared), "l1_norm": args.l1_norm, "l1_wmax": args.l1_wmax,
            "l1_inhibition": args.l1_inhibition, "l1_stdp_reduce": args.l1_stdp_reduce, "l1_examples": args.l1_examples, "l1_snapshot": args.l1_snapshot,
            "l1_stop_stationary": bool(args.l1_stop_stationary), "l2_inputs": n_in, "l2_norm": l2_norm, "l2_wmax": l2_wmax, "shift": args.shift}

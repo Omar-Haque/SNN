@@ -117,3 +117,22 @@ What the batch established, in order:
 per window, so the same stroke maps to the same channel more often); `--l1-readout-inhibition 17.5` (features learned at
 200 mV, read out with a runner-up allowed: +50 % within-class overlap at 2.5x contrast in the replay); and the single-layer
 reference in the same regime.
+
+**Batch 2 (Unity 2026-11-11; 6 epochs, layer-2 θ decay τ 30k)** — details and figure in `layer2_analysis/`:
+
+| run | held-out | shifted (2 px) |
+|---|---|---|
+| single-layer reference | 85.9 | 60.8 |
+| 16 features (control) | 65.1 | 44.0 |
+| 16 features, `--l1-readout-inhibition 17.5` | 70.0 | 45.7 |
+| 8 features | 61.3 | 39.6 |
+| 8 features, 17.5 mV readout | 65.0 | 42.2 |
+| 4 features | 55.1 | 35.6 |
+
+The layer-1 changes rank as `layer1_analysis` predicted (coarser features hurt, the soft readout helps), three times more
+training bought nothing, and no two-layer run is more shift-tolerant than the single layer. The trained layer-2 templates
+are worth 76–81 % when the best-matching one is chosen, but the spiking race reads them out at 66–68 %: the winning
+layer-2 neuron fires after ~12 input spikes, when a third of the windows have reported (the calibration matches the
+pixel network's mean drive with a tenth of its spikes, so each spike is ~10 mV). Scaling layer-2's input weights by 0.3
+at test time alone gives 73 %. Batch 3 (`unity/submit_multi_layer.sh`) trains with a lower `--l2-drive` and a higher
+layer-2 learning rate (`--l2-lr-mult`, new; run names now carry `_drv<x>` and `_lr<x>`).

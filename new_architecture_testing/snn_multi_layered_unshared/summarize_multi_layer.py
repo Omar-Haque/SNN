@@ -22,6 +22,8 @@ def label(cfg):
     lab += f" n{cfg.get('num_neurons', 400)}" if cfg.get("num_neurons", 400) != 400 else ""
     lab += f" τ{cfg['theta_tau'] / 1000:g}k" if cfg.get("theta_tau") else ""
     lab += f" rd{cfg['l1_readout_inhibition']:g}" if cfg.get("l1_readout_inhibition") is not None and not cfg.get("no_l1") else ""
+    lab += f" drv{cfg['l2_drive_arg']:g}" if cfg.get("l2_drive_arg", 1.2) != 1.2 and not cfg.get("no_l1") else ""
+    lab += f" lr{cfg['l2_lr_mult']:g}" if cfg.get("l2_lr_mult", 1.0) != 1.0 else ""
     lab += " wta" if cfg.get("l1_wta") or cfg.get("l2_wta") else ""
     lab += f" ep{cfg['num_epochs']}" if cfg.get("num_epochs", 2) != 2 else ""
     return lab
