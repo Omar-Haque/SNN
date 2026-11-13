@@ -1,0 +1,27 @@
+Using CUDA.
+/home/csigrist_umass_edu/SNN/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:497: UserWarning: Found GPU0 NVIDIA GeForce GTX 1080 Ti which is of compute capability (CC) 6.1.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+- 7.5 which supports hardware CC >=7.5,<8.0
+- 8.0 which supports hardware CC >=8.0,<9.0
+- 8.6 which supports hardware CC >=8.6,<9.0
+- 9.0 which supports hardware CC >=9.0,<10.0
+- 10.0 which supports hardware CC >=10.0,<11.0 except {10.1}
+- 12.0 which supports hardware CC >=12.0,<13.0
+Your installed torch==2.15.0+cu132 does not include kernels for this GPU. Reinstall the same version against a CUDA build that does, e.g.:
+  For CUDA 12.6 use pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cu126
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/home/csigrist_umass_edu/SNN/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:627: UserWarning: 
+NVIDIA GeForce GTX 1080 Ti with CUDA capability sm_61 is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities sm_75 sm_80 sm_86 sm_90 sm_100 sm_120.
+If you want to use the NVIDIA GeForce GTX 1080 Ti GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+
+  queued_call()
+Traceback (most recent call last):
+  File "/home/csigrist_umass_edu/SNN/src/snn_exp.py", line 780, in <module>
+    train(
+  File "/home/csigrist_umass_edu/SNN/src/snn_exp.py", line 514, in train
+    cooper_assignments = -torch.ones(model.num_neurons, dtype=torch.long, device=device)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.AcceleratorError: CUDA error: no kernel image is available for execution on the device
+Search for `cudaErrorNoKernelImageForDevice' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
+

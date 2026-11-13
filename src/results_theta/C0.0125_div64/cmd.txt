@@ -1,0 +1,1 @@
+/home/csigrist_umass_edu/SNN/venv/bin/python snn_exp.py --name C0.0125_div64 --results_dir results_theta --n_neurons 400 --epochs 3 --batch_size 32 --num_steps 350 --inh 200.0 --refrac 0 --lr_scale 1.0 --intensity 0.1 --snapshot_interval 50 --theta_plus 0.8 --theta_div 64 --seed 0

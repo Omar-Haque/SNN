@@ -1,0 +1,20 @@
+{
+  "name": "p0.0008_lam1e-06",
+  "results_dir": "results_theta_plus_decay",
+  "seed": 0,
+  "n_neurons": 100,
+  "theta_plus": 0.0008,
+  "theta_decay": 0.999999,
+  "inh": 200.0,
+  "num_steps": 350,
+  "intensity": 0.1,
+  "epochs": 3,
+  "batch_size": 32,
+  "max_train": null,
+  "snapshot_interval": 50,
+  "assign_n": 2000,
+  "eval_n": 1000,
+  "theta_div": 1.0,
+  "lam": 1.0000000000287557e-06,
+  "K": 799.9999999769955
+}
