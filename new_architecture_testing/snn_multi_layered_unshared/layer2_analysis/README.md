@@ -99,6 +99,48 @@ why batch 3 pairs the lower drive with a higher layer-2 learning rate.
 Ceiling to keep in mind: an ideal prototype learner on this layer 1 gets 82–84 %, below the single layer's 86–87 %. Fixing
 layer 2 can close most of the gap; beating the single layer needs a better layer-1 code.
 
+## Batch 3 results (Unity 2026-11-13) — `batch3_diag.py`
+
+Unity numbers (final = mean of the last 3 snapshots; one snapshot is ±1–2 points on 1,000 test images):
+
+| run | held-out | best snapshot | shifted ±2 px | accuracy at 6k examples | rows still at initial weights at 32k |
+|---|---|---|---|---|---|
+| single layer (batch 2) | 85.9 | 87.7 | 60.8 | 68.7 | 0 |
+| control: drive 1.2, lr ×1 (batch 2) | 65.1 | 69.7 | 44.0 | 31.8 | 388 |
+| lr ×3 | 67.8 | 70.9 | 47.8 | 49.5 | 84 |
+| drive 0.6 | 73.7 | 75.5 | 47.6 | 33.8 | 400 |
+| drive 0.36 | 72.9 | 75.3 | 46.4 | 30.2 | 400 |
+| drive 0.6, lr ×6 | 77.3 | 80.3 | 55.2 | 58.2 | 47 |
+| drive 0.6, lr ×6, 17.5 mV readout | 80.8 | 83.3 | 55.4 | 60.8 | 65 |
+| drive 0.36, lr ×10 | **82.3** | 84.8 | 57.7 | 66.2 | 96 |
+
+The best two-layer run is 3.6 points under the single layer (and 3 under it on shifted digits) — close, not matched, one seed.
+
+The trained weights replayed in numpy (2,000 training images for labels, 1,000 test images):
+
+| run | spiking network (replay) | the same templates, best cosine match wins | winner's first spike | input spikes it has received | windows reported by then | share of a neuron's wins from its commonest class |
+|---|---|---|---|---|---|---|
+| control: drive 1.2, lr ×1 | 67.3 | 77.2 | 30 ms | 12 | 12 of 38 (32 %) | 0.81 |
+| lr ×3 | 70.7 | 81.1 | 29 ms | 11 | 11 of 38 (30 %) | 0.82 |
+| drive 0.36 | 74.4 | 74.4 | 52 ms | 32 | 27 of 38 (73 %) | 0.84 |
+| drive 0.6, lr ×6 | 76.1 | 81.9 | 33 ms | 16 | 16 of 38 (43 %) | 0.87 |
+| drive 0.6, lr ×6, 17.5 mV readout | 83.2 | 85.3 | 34 ms | 17 | 17 of 72 channels | 0.89 |
+| drive 0.36, lr ×10 | 84.3 | 85.1 | 40 ms | 22 | 21 of 38 (58 %) | 0.90 |
+
+- **Lower drive closes the readout gap.** At drive 0.36 the winner fires after 22–32 input spikes from 58–73 % of the windows,
+  and the spiking network answers as well as the best-matching template (84.3 vs 85.1; 74.4 vs 74.4). At drive 1.2 it loses
+  10 points whatever the learning rate (67.3 vs 77.2; 70.7 vs 81.1).
+- **Higher learning rate makes the templates.** With lr ×1 the rows barely move for 60k+ examples at any drive; with the raised
+  rate the network is at 58–66 % after 6k examples (control 32 %, single layer 69 %) and the templates end up worth 82–85 %
+  with a best-match readout instead of 74–77 %.
+- **Neither is enough alone**: lr ×3 gives good templates read out badly (67.8 %), drive 0.36 gives a faithful readout of
+  poor templates (72.9 %, still climbing after 6 epochs). Together: 82.3 %.
+- The 17.5 mV layer-1 readout adds 3.5 points at the same drive and rate (77.3 → 80.8).
+- The "ceiling" quoted above (82–84 % from 400-prototype k-means on 10,000 training codes) was an estimate from one
+  idealised learner, not a limit: the best run's templates score 85 % with a best-match readout.
+- Not run: drive 0.36 + lr ×10 + 17.5 mV readout; a second seed of the best run; more than 6 epochs (the best run went from
+  80.0 at 179k examples to 83.8–84.8 at 300–358k).
+
 ## Scripts
 
 | script | what it does |
@@ -108,4 +150,5 @@ layer 2 can close most of the gap; beating the single layer needs a better layer
 | `static_l2.py ../results/<run>` | the four readers on a run's trained weights → `cache/static_*.json` |
 | `probe_first.py ../results/<run>` | input received when layer 2 decides → `cache/probe_*.json` |
 | `readout_scale.py ../results/<run> 1,0.5,0.3,0.2,0.12` | test-time weight scaling → `cache/readout_scale_*.json` |
+| `batch3_diag.py ../results/<run> [...]` | readers + decision probe in one row per run → `cache/batch3_*.json` |
 | `figures_batch2.py` | `figs/B2_summary.png` |

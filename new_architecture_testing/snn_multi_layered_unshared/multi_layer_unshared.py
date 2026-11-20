@@ -22,7 +22,9 @@ LAYER 1 (defaults; all flags)
   --l1-examples 30,000 (each template sees ONE window per image, so it converges at the single-layer pace, not the
   shared layer's 64x pace) and freezes it once the reservoir of flat templates has stopped shrinking for 5 snapshots
   and theta is stationary. Border windows that never see ink keep flat templates forever; they are reported and
-  excluded from nothing -- they simply never fire.
+  excluded from nothing -- they simply never fire. While it trains, layer 1 is also scored as the output layer (its 1,024
+  neurons labelled and evaluated exactly like layer 2), so F1's accuracy curve covers stage A; a green dashed line in the
+  figures marks the freeze, where layer 2 becomes the output.
 LAYER 2  the test4 D&C layer on the 1,024 (or pooled 256) lines, theta_plus 0.5, optional decay; evaluation as before
          (held-out 1k test images, plus the same images shifted by up to +-2 px).
 USAGE  python multi_layer_unshared.py --seed 0          python multi_layer_unshared.py --pool2       python multi_layer_unshared.py --no-l1
@@ -48,11 +50,23 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # the local multi_layer_plots.py, importable from any CWD
 from multi_layer_plots import make_run_figures, spike_time_from_curve
 
+# WHERE THE CODE COMES FROM
+#   * excitatory_neurons and DiehlAndCookNetwork: the base file's classes (src/snn_normalized replicate_results.py, via
+#     test4.py), with its hard-coded constants turned into constructor arguments; comments marked ADDED / NEW below say
+#     exactly what differs.
+#   * assign_neuron_labels and evaluate_network: the base file's estimators, unchanged.
+#   * Everything else (FeatureLayer, pool2x2, TwoLayerNetwork, the helpers, stage A, the calibration, stage B and main)
+#     is new to this script.
+#
+# Paths. This file lives in <repo>/new_architecture_testing/snn_multi_layered_unshared/, so parents[0] is
+# new_architecture_testing and parents[1] is the repo root. MNIST is read from (downloaded to) <repo>/data, the folder
+# every script in the repo shares; each run writes its own folder under ./results/ (or under --results-dir, e.g. results_2).
 script_dir: Path = Path(__file__).resolve().parent
 repo_root: Path = script_dir.parents[1]            # .../cooper
 DATA_ROOT: Path = repo_root / "data"
 results_root: Path = script_dir / "results"
 
+# Both MNIST splits, loaded once at import time. ToTensor() gives float intensities in [0, 1], shape (1, 28, 28) per image.
 train_dataset: datasets.MNIST = datasets.MNIST(root=str(DATA_ROOT), train=True, download=True, transform=transforms.ToTensor())
 test_dataset: datasets.MNIST = datasets.MNIST(root=str(DATA_ROOT), train=False, download=True, transform=transforms.ToTensor())
 
@@ -62,6 +76,10 @@ test_dataset: datasets.MNIST = datasets.MNIST(root=str(DATA_ROOT), train=False, 
 # equations inline because its theta may be per feature rather than per neuron (see FeatureLayer.forward).
 # =====================================================================================================================
 class excitatory_neurons(nn.Module):
+    # ADDED vs the base file: the constants the base file hard-codes are constructor arguments here -- theta_plus (base 0.05),
+    # theta_decay_tau_steps (base 1e7 timesteps, i.e. no decay in practice), num_neurons (base 400) -- plus two options the base
+    # file has switched off: theta_max (a ceiling on theta; base: a commented-out clamp; this script always passes None) and
+    # wta (the per-timestep tie-break; base: the commented-out "WTA" block). The rest of the class is the base file's code.
     def __init__(self, theta_plus: float = 0.05, theta_decay_tau_steps: float = 1e7, theta_max: float | None = None,
                  num_neurons: int = 400, wta: bool = False):
         super(excitatory_neurons, self).__init__()
@@ -72,6 +90,8 @@ class excitatory_neurons(nn.Module):
         self.theta_decay: float = math.exp(-1.0 / theta_decay_tau_steps)
         self.theta_max: float | None = theta_max
         self.v:     torch.Tensor | None = None
+        # g_e, g_i, tau_m, decay_ge, decay_gi, E_exc and E_inh are left over from the base file's conductance-based version:
+        # forward() never uses them. Inputs are added straight to v as millivolts (current-based).
         self.g_e:   torch.Tensor | None = None
         self.g_i:   torch.Tensor | None = None
         self.theta: torch.Tensor | None = (torch.ones(self.num_neurons) * self.theta_base)
@@ -98,6 +118,10 @@ class excitatory_neurons(nn.Module):
         self.v += x_exc - x_inh
         self.raw_v: torch.Tensor = self.v.clone()
         spikes: torch.Tensor = (self.v >= self.theta).float()
+        # NEW (the base file's commented-out WTA block, switched on by --l2-wta): keep at most one spike per image per millisecond.
+        # A copy of v gets -inf wherever the neuron did not cross threshold, argmax picks the crossing neuron with the highest v,
+        # scatter_ builds a one-hot mask, and the product keeps only that spike. If no neuron crossed, argmax returns 0 but that
+        # neuron's spike is 0, so the mask changes nothing.
         if self.wta:
             # Resolve simultaneous threshold crossings: per image, only the spiking neuron with the highest potential fires.
             competing_v = self.v.clone()
@@ -109,6 +133,7 @@ class excitatory_neurons(nn.Module):
         self.v[spikes == 1.0] = self.E_rest
         if learning:
             self.theta += (spikes.sum(dim=0) * self.theta_plus) / 16
+            # NEW: optional ceiling on theta (unused here: main() passes theta_max=None).
             if self.theta_max is not None:
                 self.theta.clamp_(max=self.theta_max)
         return spikes
@@ -119,11 +144,19 @@ class excitatory_neurons(nn.Module):
 # target (78.4) and the weight ceiling (1.0) are constructor arguments.
 # =====================================================================================================================
 class DiehlAndCookNetwork(nn.Module):
+    # ADDED vs the base file: n_inputs (base: 784 pixels), w_norm (base: 78.4, the sum every weight row is rescaled to), w_max
+    # (base: 1.0), inhibition_mV (base: 200) and the theta/wta options passed on to excitatory_neurons. In this script n_inputs
+    # is 1,024 (one input line per layer-1 neuron), 256 with --pool2, or 784 with --no-l1; w_norm and w_max are set
+    # provisionally in main() and then replaced by calibrate_layer2(). Weight initialisation, the STDP rule, the traces and the
+    # lateral inhibition are the base file's.
     def __init__(self, n_inputs: int = 784, num_neurons: int = 400, theta_plus: float = 0.05, inhibition_mV: float = 200.0,
                  theta_decay_tau_steps: float = 1e7, theta_max: float | None = None, w_norm: float = 78.4, w_max: float = 1.0, wta: bool = False):
         super(DiehlAndCookNetwork, self).__init__()
         self.n_inputs: int = n_inputs
         self.num_neurons: int = num_neurons
+        # synapses.weight has shape (num_neurons, n_inputs) = (400, 1024): row j holds layer-2 neuron j's weight from every layer-1
+        # neuron (all-to-all, no spatial structure). synapses(input_spikes) computes input_spikes @ weight.T: for every layer-2
+        # neuron, the sum of its weights on the lines that spiked this millisecond, added to v as mV.
         self.synapses: nn.Linear = nn.Linear(self.n_inputs, self.num_neurons, bias=False)
         self.synapses.weight.requires_grad = False # Using STDP instead
         self.w_max:    float = w_max      # weight upper limit (1.0 in the base file)
@@ -147,6 +180,7 @@ class DiehlAndCookNetwork(nn.Module):
         self.neurons.reset(batch_size, device)
         self.inh_matrix  = self.inh_matrix.to(device)
         self.prev_spikes = torch.zeros(batch_size, self.num_neurons, device=device)
+        # one presynaptic trace per input line: 1,024 layer-1 lines here (784 pixels in the base file)
         self.x_trace     = torch.zeros(batch_size, self.n_inputs, device=device)
         self.y_trace     = torch.zeros(batch_size, self.num_neurons, device=device)
 
@@ -179,6 +213,19 @@ class FeatureLayer(nn.Module):
     Shapes: patches (B, P, K); templates W (F, K) if shared else (P*F, K); membrane v, spikes, traces (B, P, F);
     theta (P*F,) per neuron or (F,) per feature. Output: spikes flattened to (B, P*F), neuron index = p*F + f.
     """
+    # Constructor arguments (main() passes the command-line values):
+    #   patch, stride          window size and step on the 28x28 image (7, 3 -> 8x8 = 64 windows; neighbours overlap by 4 px)
+    #   n_features (F)         neurons per window (16)
+    #   shared                 True = one set of F templates used at every window (the failed shared design);
+    #                          False = every (window, feature) neuron has its own template (the default from the command line)
+    #   theta_plus             adaptive-threshold increment, applied as theta_plus / 16 per spike like the base file (0.1)
+    #   theta_decay_tau_steps  time constant of theta's relaxation toward -52 mV, in TIMESTEPS (main converts from examples)
+    #   theta_shared           one theta per feature index, shared by all windows, instead of one per neuron (off by default)
+    #   w_norm, w_max          each template is rescaled to sum to w_norm after every update and clamped to [0, w_max] (12, 1.5)
+    #   lr_plus, lr_minus      STDP rates, the base file's 1e-2 and 1e-4
+    #   inhibition_mV          what each spike costs the OTHER features of the same window on the next step (200)
+    #   stdp_reduce            shared only: sum the updates of all windows ("sum") or average them ("mean")
+    #   wta                    per-window tie-break, see forward()
     def __init__(self, patch: int = 7, stride: int = 3, n_features: int = 16, shared: bool = True,
                  theta_plus: float = 0.1, theta_decay_tau_steps: float = 1e7, theta_shared: bool = False,
                  w_norm: float = 9.8, w_max: float = 1.0, lr_plus: float = 1e-2, lr_minus: float = 1e-4,
@@ -186,6 +233,7 @@ class FeatureLayer(nn.Module):
         super().__init__()
         self.patch, self.stride, self.F, self.shared = patch, stride, n_features, shared
         self.wta: bool = wta   # within-position tie-break: when several features of a window cross in the same step, only the highest fires
+        # K = pixels per window (49); side = windows per row/column = (28 - 7) // 3 + 1 = 8; P = 64 windows; N = P*F = 1,024 neurons.
         self.K: int = patch * patch
         self.side: int = (image_side - patch) // stride + 1
         self.P: int = self.side * self.side
@@ -196,11 +244,19 @@ class FeatureLayer(nn.Module):
         self.stdp_reduce: str = stdp_reduce
         # index table: idx[p, k] = flat pixel index (row-major 28x28) of the k-th pixel of window p
         idx = []
+        # Window p = py * side + px (row-major over the 8x8 grid) has its top-left pixel at image row py*stride, column px*stride,
+        # i.e. flat index base = (py*stride)*28 + px*stride. Its 49 pixels, row-major inside the window, are base + r*28 + c for
+        # r, c in 0..6. E.g. window 0 covers rows 0-6 / cols 0-6, window 1 rows 0-6 / cols 3-9, window 8 rows 3-9 / cols 0-6.
         for py in range(self.side):
             for px in range(self.side):
                 base = (py * stride) * image_side + px * stride
                 idx.append([base + r * image_side + c for r in range(patch) for c in range(patch)])
+        # a buffer, not a parameter: it moves with .to(device) and is saved with the model, but is never trained
         self.register_buffer("idx", torch.tensor(idx, dtype=torch.long))          # (P, K)
+        # Initial templates: uniform in [0.01, 0.3], then each row rescaled to sum to w_norm (12 -> mean weight 12 / 49 = 0.245):
+        # the base file's initialisation with a different row sum. W has F rows if shared, N = 1,024 rows if unshared, where row
+        # p*F + f belongs to neuron (window p, feature f). It is an nn.Parameter only so that .to(device) and saving work; it has
+        # no gradient and is changed only by the STDP code in forward().
         n_templates = self.F if shared else self.N
         W = torch.empty(n_templates, self.K).uniform_(0.01, 0.3)
         W = W * (w_norm / W.sum(dim=1, keepdim=True))
@@ -213,7 +269,10 @@ class FeatureLayer(nn.Module):
         self.decay: float = math.exp(-1.0 / 100)
         self.decay_x: float = math.exp(-1.0 / 20.0)
         self.decay_y: float = math.exp(-1.0 / 20.0)
+        # theta = the adaptive threshold (absolute, in mV): one per neuron (N,), or one per feature (F,) with theta_shared.
+        # Unlike v it is NOT reset between batches: it is the long-term memory of how often each neuron has fired.
         self.theta: torch.Tensor = torch.ones(self.F if theta_shared else self.N) * self.theta_base
+        # per-presentation state; reset() creates these with the right batch size
         self.v: torch.Tensor = torch.empty(0); self.prev_spikes: torch.Tensor = torch.empty(0)
         self.x_trace: torch.Tensor = torch.empty(0); self.y_trace: torch.Tensor = torch.empty(0)
 
@@ -226,6 +285,12 @@ class FeatureLayer(nn.Module):
         return self.W.detach()
 
     def reset(self, batch_size: int, device: torch.device) -> None:
+        # Called before every batch (= every 350-ms presentation). theta keeps its value; everything else restarts:
+        #   v (B, P, F)            membrane potential of every neuron for every image, at rest (-65 mV)
+        #   prev_spikes (B, P, F)  last step's spikes, used for the within-window inhibition
+        #   x_trace (B, P, K)      presynaptic trace of the 49 pixels of each window (a pixel inside several windows has one copy per
+        #                          window; the copies are identical, this layout just keeps the per-window einsums simple)
+        #   y_trace (B, P, F)      postsynaptic trace of every neuron
         self.theta = self.theta.to(device)
         self.v = torch.ones(batch_size, self.P, self.F, device=device) * self.E_rest
         self.prev_spikes = torch.zeros(batch_size, self.P, self.F, device=device)
@@ -233,22 +298,37 @@ class FeatureLayer(nn.Module):
         self.y_trace = torch.zeros(batch_size, self.P, self.F, device=device)
 
     def forward(self, input_spikes: torch.Tensor, learning: bool = True) -> torch.Tensor:
+        # One millisecond. input_spikes: (B, 784) of 0/1, the Poisson pixel spikes of this ms for each image in the batch.
+        # Returns the (B, N) 0/1 spikes of the 1,024 neurons, neuron index p*F + f.
         B = input_spikes.shape[0]
+        # Gather each window's pixels: advanced indexing with idx (P, K) turns (B, 784) into (B, P, K).
         patches = input_spikes[:, self.idx]                                            # (B, P, K): the 49 pixels of each window
+        # Feed-forward drive in mV for this ms. Unshared: x_exc[b, p, f] = sum over k of patches[b, p, k] * W[p*F + f, k], i.e. each
+        # neuron sees only its own window's 49 pixels through its own template (W viewed as (P, F, K), einsum over k).
+        # Shared: the same F templates are applied to all 64 windows.
         if self.shared:
             x_exc = torch.matmul(patches, self.W.t())                                  # (B, P, F): template f against every window
         else:
             x_exc = torch.einsum("bpk,pfk->bpf", patches, self.W.view(self.P, self.F, self.K))
         # lateral inhibition WITHIN a position: a neuron is hit by every other feature at its position that fired last step
+        # ps.sum(dim=2) counts the features of each window that spiked last step; subtracting ps removes a neuron's own spike. So a
+        # neuron that fired alone gets no inhibition and the 15 others in its window get -200 mV each. Windows never inhibit each
+        # other. Because inhibition comes from the PREVIOUS step, features that cross threshold in the same ms all fire (a tie).
         ps = self.prev_spikes
         x_inh = self.inhibition * (ps.sum(dim=2, keepdim=True) - ps)                  # (B, P, F)
         # ---- LIF, same equations as excitatory_neurons.forward ----
+        # Leak: v relaxes toward E_rest = -65 mV with tau_m = 100 ms (one step = 1 ms). theta relaxes toward -52 mV with
+        # theta_decay_tau_steps, but only while learning, so a frozen layer 1 keeps fixed thresholds. Then this ms's input is added.
         self.v = self.decay * (self.v - self.E_rest) + self.E_rest
         if learning:
             self.theta = self.theta_base + (self.theta - self.theta_base) * self.theta_decay
         self.v += x_exc - x_inh
+        # theta reshaped to broadcast over the batch: (1, 1, F) with one theta per feature, (1, P, F) with one per neuron
         theta_b = self.theta.view(1, 1, self.F) if self.theta_shared else self.theta.view(1, self.P, self.F)
         spikes = (self.v >= theta_b).float()
+        # Mechanics of the tie-break: non-spiking entries of a copy of v are set to -inf, argmax over the feature axis picks the
+        # highest crossing feature per (image, window) -> (B, P), scatter_ builds a one-hot mask over the 16 features, and the
+        # product keeps only that spike. In a window where nothing crossed, argmax gives 0 but that spike is 0, so nothing changes.
         if self.wta:
             # The 16 features of a window see the identical input and inhibition only arrives next step, so once their
             # templates are similar they cross threshold in the same millisecond and all fire ("volley"). Resolve it
@@ -257,15 +337,22 @@ class FeatureLayer(nn.Module):
             top_f = torch.argmax(competing, dim=2)                                       # (B, P)
             mask = torch.zeros_like(spikes); mask.scatter_(2, top_f.unsqueeze(2), 1.0)
             spikes = spikes * mask
+        # neurons that spiked go back to rest (no refractory period, as in the base file)
         self.v[spikes == 1.0] = self.E_rest
         if learning:
+            # Adaptive threshold: each spike raises its neuron's theta by theta_plus / 16 (spikes are summed over the batch first, as in
+            # the base file). With theta_shared the increment is the feature's spikes averaged over the 64 windows.
             if self.theta_shared:
                 self.theta += spikes.sum(dim=0).mean(dim=0) * self.theta_plus / 16      # (F,): the feature's spikes, averaged over positions
             else:
                 self.theta += spikes.sum(dim=0).reshape(-1) * self.theta_plus / 16     # (P*F,): each neuron's own spikes
             # ---- STDP, the D&C rule per neuron, reduced into the templates ----
+            # Traces, as in the base file: decay by e^(-1/20) per ms (tau 20 ms), +1 for every spike this ms.
+            # x_trace = how recently each pixel of each window fired; y_trace = how recently each layer-1 neuron fired.
             self.x_trace = self.x_trace * self.decay_x + patches
             self.y_trace = self.y_trace * self.decay_y + spikes
+            # Shared: the same rule, but the requests of every window where feature f fired are summed into ONE template (F, K) -- what
+            # averaged unrelated patches into a blob in the shared run. div = B, or B * P with stdp_reduce = "mean".
             if self.shared:
                 post = torch.einsum("bpf,bpk->fk", spikes, self.x_trace)              # (F, K): potentiation requests, summed over positions
                 pre = torch.einsum("bpf,bpk->fk", self.y_trace, patches)
@@ -273,20 +360,35 @@ class FeatureLayer(nn.Module):
                 W = self.W
                 dW = self.lr_plus * (post / div) * (self.w_max - W) - self.lr_minus * (pre / div) * W
             else:
+                # Unshared (the default). For each neuron (p, f), averaged over the batch:
+                #   post[p, f, k] = sum_b spikes[b, p, f] * x_trace[b, p, k]   when the neuron spikes, credit the pixels of ITS window that
+                #                                                               fired recently (potentiation)
+                #   pre[p, f, k]  = sum_b y_trace[b, p, f] * patches[b, p, k]   when a pixel of its window spikes, debit it in proportion to
+                #                                                               how recently the neuron fired (depression)
+                #   dW = lr_plus * post * (w_max - W) - lr_minus * pre * W      the base file's rule, neuron by neuron
+                # A neuron changes only from its own window's activity, so its template imprints exactly the patches it wins.
                 post = torch.einsum("bpf,bpk->pfk", spikes, self.x_trace) / B          # (P, F, K): each neuron its own
                 pre = torch.einsum("bpf,bpk->pfk", self.y_trace, patches) / B
                 W = self.W.view(self.P, self.F, self.K)
                 dW = (self.lr_plus * post * (self.w_max - W) - self.lr_minus * pre * W).view(self.N, self.K)
+            # Apply (no gradient tracking, W is a Parameter): add the update, clamp to [0, w_max], and rescale every template so its 49
+            # weights sum to w_norm again (the base file's normalisation, with 12 instead of 78.4).
             with torch.no_grad():
                 self.W.add_(dW)
                 self.W.clamp_(min=0.0, max=self.w_max)
                 self.W.mul_(self.w_norm / self.W.sum(dim=1, keepdim=True))
+        # keep this step's spikes for next step's inhibition; return them flattened to (B, P*F), index p*F + f
         self.prev_spikes = spikes
         return spikes.reshape(B, self.N)
 
 
 def pool2x2(spikes: torch.Tensor, side: int, F: int) -> torch.Tensor:
     """Spike-OR over 2x2 blocks of positions per feature: (B, side*side*F) -> (B, (side//2)*(side//2)*F)."""
+    # spikes: (B, side*side*F), index (py*side + px)*F + f. View as (B, side, side, F); crop to an even side (a no-op for the
+    # default side 8; with an odd side the cropped tensor would need .contiguous() before the next .view); split each spatial
+    # axis into (side/2 blocks, 2 within a block) and take the max over the two within-block axes. The max of 0/1 values is a
+    # logical OR: pooled feature f of block (Y, X) spikes this ms if f spiked in any of the windows (2Y..2Y+1, 2X..2X+1).
+    # 8x8 windows x 16 features = 1,024 lines -> 4x4 x 16 = 256 lines.
     B = spikes.shape[0]
     s = spikes.view(B, side, side, F)[:, : side // 2 * 2, : side // 2 * 2, :]
     s = s.view(B, side // 2, 2, side // 2, 2, F).amax(dim=(2, 4))
@@ -296,13 +398,19 @@ def pool2x2(spikes: torch.Tensor, side: int, F: int) -> torch.Tensor:
 class TwoLayerNetwork(nn.Module):
     """Layer 1 (optional) -> optional 2x2 pooling -> layer 2. Exposes the single-layer interface the estimators use:
     reset(batch_size, device), forward(input_spikes, learning) -> layer-2 spikes, num_neurons, synapses (layer 2)."""
+    # Wraps layer 1 (None for --no-l1), the optional pooling and layer 2, so that the rest of the code -- including the base
+    # file's estimators, written for the single-layer network -- can treat the whole thing as one network.
     def __init__(self, l1: FeatureLayer | None, l2: DiehlAndCookNetwork, pool2: bool = False):
         super().__init__()
         self.l1, self.l2, self.pool2 = l1, l2, pool2
+        # learn_l1 / learn_l2 switch learning per layer: stage A trains layer 1 only (learn_l1 True, learn_l2 False); after the
+        # freeze, stage B trains layer 2 only. The estimators also pass learning=False, which switches both off.
         self.learn_l1: bool = l1 is not None     # stage A: True; frozen afterwards
         self.learn_l2: bool = True
         self.last_l1_spikes: torch.Tensor | None = None   # (B, N1) of the last timestep (for the stage-B usage stats)
 
+    # The estimators and the plotting code read model.num_neurons / model.synapses / model.neurons; these forward to layer 2,
+    # so they see the same interface as the single-layer DiehlAndCookNetwork.
     @property
     def num_neurons(self) -> int:
         return self.l2.num_neurons
@@ -315,6 +423,7 @@ class TwoLayerNetwork(nn.Module):
     def neurons(self):
         return self.l2.neurons
 
+    # input lines into layer 2: 784 pixels without layer 1, (side/2)^2 * F with pooling, else P * F (1,024)
     def l2_input_size(self) -> int:
         if self.l1 is None: return 784
         return (self.l1.side // 2) ** 2 * self.l1.F if self.pool2 else self.l1.N
@@ -324,6 +433,9 @@ class TwoLayerNetwork(nn.Module):
         self.l2.reset(batch_size, device)
 
     def forward(self, input_spikes: torch.Tensor, learning: bool = True) -> torch.Tensor:
+        # One millisecond of the whole network. Layer 1 turns this ms's pixel spikes into this ms's layer-1 spikes (B, 1,024), and
+        # layer 2 receives them in the SAME step: there is no synaptic delay between the layers. Each layer learns only if the
+        # caller asked for learning AND its own learn_* flag is on.
         x = input_spikes
         if self.l1 is not None:
             x = self.l1(x, learning=learning and self.learn_l1)
@@ -398,6 +510,9 @@ def evaluate_network(model, data_loader: DataLoader, neuron_assignments: torch.T
 # =====================================================================================================================
 def template_sharpness(W: torch.Tensor, k: int) -> torch.Tensor:
     """Share of each row's mass on its k largest entries (CPU, float32). k = n_inputs / 7.84 keeps the flat-row value at ~0.23."""
+    # (rows, inputs) -> for each row, the sum of its k largest weights / the sum of all its weights. For 784-pixel templates
+    # k = 100: a fresh uniform row scores ~0.23, a learned digit template 0.4-0.8. Used for layer 2 (k = 131 for 1,024 inputs)
+    # and still logged for layer 1 (k = 6) for comparison with earlier runs.
     Wc = W.detach().float().cpu()
     return Wc.topk(k, dim=1).values.sum(dim=1) / Wc.sum(dim=1)
 
@@ -407,6 +522,9 @@ def template_structure(W: torch.Tensor, side: int) -> torch.Tensor:
     the vertical and horizontal shifts). A random template scores ~0 (p95 ≈ 0.16); a learned stroke band scores 0.5-0.9.
     This replaces the top-k share for layer 1: a stroke band 3-4 px wide covers ~20 of 49 pixels, so its top-6 share can never
     reach the 0.35 that marks a trained pixel template, which made every band look "flat"."""
+    # T: (rows, side, side), each template minus its own mean. cos(a, b) is the cosine similarity of two stacks of images.
+    # T[:, 1:, :] vs T[:, :-1, :] compares every pixel with the one above it; T[:, :, 1:] vs T[:, :, :-1] with the one to its
+    # left. Smooth strokes -> neighbouring weights alike -> high score; independent random weights -> ~0.
     T = W.detach().float().cpu().view(-1, side, side); T = T - T.mean(dim=(1, 2), keepdim=True)
     def cos(a, b): return (a * b).sum(dim=(1, 2)) / ((a * a).sum(dim=(1, 2)).sqrt() * (b * b).sum(dim=(1, 2)).sqrt() + 1e-12)
     return 0.5 * (cos(T[:, 1:, :], T[:, :-1, :]) + cos(T[:, :, 1:], T[:, :, :-1]))
@@ -415,17 +533,22 @@ def template_structure(W: torch.Tensor, side: int) -> torch.Tensor:
 def cosine_to_init(W: torch.Tensor, W_init: torch.Tensor) -> torch.Tensor:
     """Cosine between each row and the row it started from: 1.0 = never changed. Criterion-free 'has this neuron learned',
     for inputs (the layer-1 code) whose sparsity caps the top-k share far below the pixel-template value."""
+    # both (rows, inputs); one cosine per row, returned on the CPU. Two all-positive rows are never orthogonal, so even a fully
+    # learned row keeps a cosine of ~0.4-0.6 to its random start; the 0.95 cut used in stage B only asks "has it moved at all".
     a = W.detach().float(); b = W_init.detach().float().to(a.device)
     return ((a * b).sum(1) / (a.norm(dim=1) * b.norm(dim=1) + 1e-12)).cpu()
 
 
 def shifted_test_set(n: int, shift: int, seed: int = 1234) -> TensorDataset:
     """The first n test images, each translated by a fixed random (dx, dy) in [-shift, shift]^2 (zero fill)."""
+    # fixed seed: every snapshot of every run is evaluated on the same 1,000 shifted images
     g = np.random.default_rng(seed)
     imgs = torch.stack([test_dataset[i][0] for i in range(n)])             # (n, 1, 28, 28)
     labels = torch.tensor([int(test_dataset[i][1]) for i in range(n)])
     out = torch.zeros_like(imgs)
     for i in range(n):
+        # For dy > 0 the digit moves down: destination rows dy..27 receive source rows 0..27-dy (dx likewise for columns), and the
+        # rows/columns left uncovered stay 0. Up to --shift (2) pixels in each direction.
         dx, dy = int(g.integers(-shift, shift + 1)), int(g.integers(-shift, shift + 1))
         src = imgs[i, 0]
         ys, ye = max(0, dy), min(28, 28 + dy); xs, xe = max(0, dx), min(28, 28 + dx)
@@ -436,26 +559,87 @@ def shifted_test_set(n: int, shift: int, seed: int = 1234) -> TensorDataset:
 # =====================================================================================================================
 # Stage A: train layer 1 alone
 # =====================================================================================================================
-def train_layer1(model: TwoLayerNetwork, loader: DataLoader, device: torch.device, cfg: dict) -> dict:
+class Layer1Readout(nn.Module):
+    """Layer 1 on its own, shaped like an output layer for the base file's estimators (they only use reset(), forward(x,
+    learning=...) and num_neurons). During stage A layer 1 is the network's last trained layer, so this is how it is scored."""
+    def __init__(self, l1: FeatureLayer):
+        super().__init__()
+        self.l1 = l1
+        self.num_neurons: int = l1.N          # 1,024: every (window, feature) neuron gets its own label
+
+    def reset(self, batch_size: int, device: torch.device) -> None:
+        self.l1.reset(batch_size, device)
+
+    def forward(self, input_spikes: torch.Tensor, learning: bool = False) -> torch.Tensor:
+        return self.l1(input_spikes, learning=False)   # never learns: templates and thetas are untouched by scoring
+
+
+def layer1_accuracy(l1: FeatureLayer, readout: tuple, device: torch.device, num_steps: int) -> tuple[float, float, int]:
+    """Held-out accuracy with layer 1 as the output layer: the stage-B estimator (labels from train images 0-1999, accuracy
+    on test images 0-999 and on their shifted copies) applied to the 1,024 layer-1 neurons. Each neuron is labelled with the
+    digit it fires most for; an image is classified by summing the spikes of the neurons carrying each label.
+    Returns (accuracy %, shifted accuracy %, neurons that received a label)."""
+    assign_loader, eval_loader, shifted_loader = readout
+    r = Layer1Readout(l1)
+    labels = assign_neuron_labels(r, assign_loader, device, num_steps)
+    acc = float(evaluate_network(r, eval_loader, labels, device, num_steps))
+    acc_s = float(evaluate_network(r, shifted_loader, labels, device, num_steps)) if shifted_loader is not None else float("nan")
+    return acc, acc_s, int((labels >= 0).sum())
+
+
+def train_layer1(model: TwoLayerNetwork, loader: DataLoader, device: torch.device, cfg: dict, readout: tuple | None = None) -> dict:
+    # Stage A: train layer 1 alone on its own shuffled stream (loader = l1_loader), learning on in layer 1 only, for at most
+    # cfg["l1_examples"] images, then freeze it. Layer 2 is not run here at all. Every cfg["l1_snapshot"] batches it measures
+    # the layer and may stop early (stop rule below). Returns the history dict that is saved into run.npz.
     l1 = model.l1; assert l1 is not None
     num_steps = cfg["num_steps"]; snap_every = cfg["l1_snapshot"]; max_examples = cfg["l1_examples"]
+    # k for the old top-k criterion on 49-input templates: round(49 / 7.84) = 6 (logged only for comparison)
     k1 = max(3, int(round(l1.K / 7.84)))
     hist = {"points": [], "sharp": [], "struct": [], "theta_med": [], "theta_p90": [], "usage": [], "dW": [], "active_frac": [], "latency": [], "reservoir": [],
             "distinct": [], "tie": [], "spikes_per_window": []}   # per active window: distinct features that fired, features in its first spiking ms, spikes
+    # Stage-A accuracy with layer 1 as the output layer (readout = (assign_loader, eval_loader, shifted_loader); None = not
+    # scored): taken after the first batch, then every cfg["snapshot_interval"] batches (the stage-B cadence, 3,200 images),
+    # and once more at the freeze, so the accuracy curve runs from image 0 to the end of stage B.
+    hist.update(acc_points=[], acc=[], acc_shifted=[])
+    # Snapshot-to-snapshot bookkeeping:
+    #   W_prev                         templates at the previous snapshot, for the size of each template's change |dW|
+    #   usage                          spikes per feature index (summed over windows and images) since the last snapshot
+    #   n_windows_ink, n_windows_fired (image, window) pairs that received any input / that also produced a layer-1 spike
+    #   lat_sum                        sum over active windows of the ms of their first spike (-> mean latency)
+    #   distinct_sum                   sum over active windows of how many different features fired during the presentation
+    #   tie_sum                        sum over active windows of how many features fired in the window's FIRST spiking ms
+    #                                  (1 = no tie)
+    #   spk_sum                        total layer-1 spikes in active windows
     W_prev = l1.templates().clone()
     usage = torch.zeros(l1.F, device=device)             # spikes per feature since the last snapshot
     n_windows_ink = 0; n_windows_fired = 0; lat_sum = 0.0; distinct_sum = 0.0; tie_sum = 0.0; spk_sum = 0.0
     seen = 0; batch_i = 0; t0 = time.time(); converged_at = None
     model.learn_l1 = True; model.learn_l2 = False
+
+    def score_layer1() -> None:
+        # Scoring draws its own Poisson spikes from torch's global generator, so a run made with this code does not reproduce
+        # the training spikes of an older run with the same seed (the image order, set by the loader's own generator, is the same).
+        acc, acc_s, n_lab = layer1_accuracy(l1, readout, device, num_steps)   # type: ignore[arg-type]
+        hist["acc_points"].append(seen); hist["acc"].append(acc); hist["acc_shifted"].append(acc_s)
+        print(f"[layer 1] {seen:>6d} ex | layer 1 as the output layer: held-out accuracy {acc:5.1f}% (shifted {acc_s:5.1f}%), "
+              f"{n_lab}/{l1.N} neurons labelled")
+
+    # at most one pass over the 60,000 images; the loop also stops at l1_examples or at the stop rule
     for data, targets in loader:
         B = data.shape[0]; data = data.to(device)
+        # Poisson input for 350 ms: each pixel fires in each ms with probability 0.1 x intensity -> (T, B, 784) of 0/1
         spike_data = spikegen.rate(data * 0.1, num_steps=num_steps).view(num_steps, B, 784)   # type: ignore
+        # reset only layer 1's per-presentation state (its thetas carry over)
         l1.reset(B, device)
+        # Per-presentation diagnostics, all (B, P): fired = the window has spiked at least once so far; first_t = ms of its first
+        # spike (NaN if none yet).
         fired = torch.zeros(B, l1.P, dtype=torch.bool, device=device)
         first_t = torch.full((B, l1.P), float("nan"), device=device)
         ink = (spike_data.sum(0)[:, l1.idx].sum(2) > 0)                                       # (B, P): windows with any input spike
         cnt = torch.zeros(B, l1.P, l1.F, device=device)                                       # spikes per feature in this presentation
         first_group = torch.zeros(B, l1.P, device=device)                                     # features that fired in the window's first spiking ms
+        # The presentation, 1 ms at a time. s: (B, P, F). newly marks windows whose first spike is in this ms; for those, record
+        # the ms and how many of their features fired in it.
         for t in range(num_steps):
             s = l1(spike_data[t], learning=True).view(B, l1.P, l1.F)
             any_f = s.sum(2) > 0
@@ -464,15 +648,18 @@ def train_layer1(model: TwoLayerNetwork, loader: DataLoader, device: torch.devic
             first_group = torch.where(newly, s.sum(2), first_group)
             fired |= any_f
             usage += s.sum(dim=(0, 1)); cnt += s
+        # after the presentation: accumulate the diagnostics over windows that had input and fired (act)
         act = fired & ink
         n_windows_ink += int(ink.sum()); n_windows_fired += int(act.sum())
         lat_sum += float(torch.nan_to_num(first_t[act], nan=0.0).sum())
         distinct_sum += float((cnt[act] > 0).sum(1).float().sum()); tie_sum += float(first_group[act].sum()); spk_sum += float(cnt[act].sum())
         seen += B; batch_i += 1
+        # snapshot every snap_every batches (20 batches = 640 images by default)
         if batch_i % snap_every == 0:
             W = l1.templates(); sharp = template_sharpness(W, k1).numpy(); struct = template_structure(W, l1.patch).numpy()
             dW = torch.linalg.norm((W - W_prev).float().cpu(), dim=1).numpy(); W_prev = W.clone()
             th = l1.theta.detach().float().cpu().numpy()
+            # the reservoir = templates whose structure score is still below 0.4, i.e. still close to their random start
             res = int((struct < 0.4).sum())                      # unstructured templates (windows that never see ink stay here)
             hist["points"].append(seen); hist["sharp"].append(sharp.astype(np.float32)); hist["struct"].append(struct.astype(np.float32)); hist["dW"].append(dW.astype(np.float32))
             hist["theta_med"].append(float(np.median(th))); hist["theta_p90"].append(float(np.percentile(th, 90)))
@@ -485,12 +672,21 @@ def train_layer1(model: TwoLayerNetwork, loader: DataLoader, device: torch.devic
                   f"windows fired {100 * hist['active_frac'][-1]:4.0f}% latency {hist['latency'][-1]:5.1f} ms | per active window: {hist['spikes_per_window'][-1]:4.1f} spikes from "
                   f"{hist['distinct'][-1]:4.1f} features, {hist['tie'][-1]:4.1f} in its first spiking ms | ‖ΔW‖ max {dW.max():.2f} | {(time.time() - t0) / 60:4.1f} min")
             usage.zero_(); n_windows_ink = n_windows_fired = 0; lat_sum = 0.0; distinct_sum = tie_sum = spk_sum = 0.0
+            # "converged" = no unstructured template left. This never happens in practice (border windows that never see ink keep
+            # random templates); the stop rule below is what ends stage A.
             if res == 0 and converged_at is None: converged_at = seen
+            # Stop rule: at least 6 snapshots, the reservoir is not smaller than it was 5 snapshots ago, AND the median theta moved by
+            # less than 0.3 mV over those 5 snapshots -> the layer has stopped changing. --l1-no-early-stop switches it off.
             if (cfg["l1_stop_stationary"] and len(hist["reservoir"]) >= 6 and hist["reservoir"][-1] >= hist["reservoir"][-6]
                     and abs(hist["theta_med"][-1] - hist["theta_med"][-6]) < 0.3):
                 print(f"[layer 1] stationary: the reservoir has not shrunk for 5 snapshots ({res} unstructured templates left, mostly windows that never see ink) "
                       f"and the median theta moved < 0.3 mV -> freezing at {seen} examples"); break
+        if readout is not None and (batch_i == 1 or batch_i % cfg["snapshot_interval"] == 0): score_layer1()
         if seen >= max_examples: break
+    # final score at the freeze point (unless that batch was just scored), so the stage-A curve ends where stage B begins
+    if readout is not None and (not hist["acc_points"] or hist["acc_points"][-1] != seen): score_layer1()
+    # Freeze: from here on TwoLayerNetwork calls layer 1 with learning=False -- no STDP, no theta increments, no theta decay.
+    # The within-window inhibition and the tie-break stay on: they are part of how the layer computes its output.
     model.learn_l1 = False   # FREEZE
     hist["converged_at"] = converged_at; hist["frozen_at"] = seen; hist["minutes"] = (time.time() - t0) / 60
     return hist
@@ -501,8 +697,12 @@ def calibrate_layer2(model: TwoLayerNetwork, loader: DataLoader, device: torch.d
     presentation -- and set layer 2's weight scale so that a flat layer-2 neuron receives target_drive mV/ms on average
     (the pixel network gets ~1.2: 12 input spikes/ms x mean weight 0.1). Mean weight m = target_drive / rate;
     row sum = m x inputs; w_max = 10 m (the base file's 1.0 / 0.1 ratio). Rescales the existing uniform weights."""
+    # Example (16 features, default drive): layer 1 sends 0.954 spikes/ms per presentation summed over its 1,024 lines, so
+    # m = 1.2 / 0.954 = 1.258, row sum = 1.258 x 1,024 = 1,288 and w_max = 12.58; a layer-1 spike onto a fully learned
+    # synapse is then worth ~10 mV. --l2-drive changes target_drive and so scales all three by the same factor.
     assert model.l1 is not None
     model.learn_l1 = False; model.learn_l2 = False
+    # run n_batches batches (160 images) through the frozen layer 1 (and the pooling, if on), counting every spike it sends
     tot_spikes = 0.0; tot_pres = 0
     with torch.no_grad():
         for bi, (data, _) in enumerate(loader):
@@ -516,7 +716,10 @@ def calibrate_layer2(model: TwoLayerNetwork, loader: DataLoader, device: torch.d
                 tot_spikes += float(x.sum())
             tot_pres += B
     rate = tot_spikes / max(1, tot_pres) / num_steps                      # input spikes per ms per presentation, summed over lines
+    # mean weight that gives target_drive mV/ms on average to a neuron whose weights are all equal (a fresh, near-uniform row)
     m = target_drive / max(rate, 1e-6)
+    # New row sum and ceiling. The existing weights already sum to the provisional row sum (old_norm), so multiplying them by
+    # w_norm / old_norm keeps their random pattern and gives every row the new sum.
     l2 = model.l2; old_norm = l2.w_norm
     l2.w_norm = m * l2.n_inputs; l2.w_max = 10.0 * m
     with torch.no_grad():
@@ -530,36 +733,52 @@ def calibrate_layer2(model: TwoLayerNetwork, loader: DataLoader, device: torch.d
 # Stage B: train layer 2 (the test4 measurement set, single i.i.d. stream) + the shifted evaluation
 # =====================================================================================================================
 def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loader, shifted_loader, device, cfg: dict, run_dir: Path, l1_hist: dict | None):
+    # Stage B: train layer 2 for num_epochs passes over the 60,000 training images, layer 1 frozen, and take the test4
+    # snapshot set every snapshot_interval batches. Writes run.npz, run.json and the figures into run_dir.
     n = model.num_neurons; num_epochs, num_steps, snapshot_interval = cfg["num_epochs"], cfg["num_steps"], cfg["snapshot_interval"]
+    # k for the top-k share on 1,024 inputs: round(1,024 / 7.84) = 131, the analogue of the single layer's top 100 of 784
     k2 = max(3, int(round(model.l2.n_inputs / 7.84)))
     P, A, S, R, H, C, L = [], [], [], [], [], [], []             # points, acc, shifted acc, reservoir, hijack, conf, assignments
     WS, TH, SH, RC, L1U = [], [], [], [], []                       # window spikes, theta, sharpness, recruit steps, layer-1 usage
+    # recruit_step[j] = examples seen when neuron j's template first reached a top-k share of 0.35 (NaN until then)
     recruit_step = np.full(n, np.nan)
     W_prev = model.l2.synapses.weight.detach().clone(); W_init = W_prev.clone(); CI, RI = [], []   # cosine to the initial row per snapshot, reservoir by that criterion
+    # spikes_since: layer-2 spikes per neuron since the last snapshot ("window spikes"); l1_usage: layer-1 spikes per feature
+    # index since the last snapshot (None for --no-l1); gbi = global batch index across epochs
     spikes_since = torch.zeros(n, device=device); l1_usage = torch.zeros(model.l1.F, device=device) if model.l1 is not None else None
     total = 0; gbi = 0; t0 = time.time()
     model.learn_l1 = False; model.learn_l2 = True
     for epoch in range(num_epochs):
         for data, targets in train_loader:
             B = data.shape[0]; data = data.to(device)
+            # (T, B, 784) Poisson pixel spikes, as in the base file
             spike_data = spikegen.rate(data * 0.1, num_steps=num_steps).view(num_steps, B, 784)   # type: ignore
             model.reset(B, device)
+            # bts: layer-2 spike counts per image over this presentation, (B, 400)
             bts = torch.zeros(B, n, device=device)
             for t in range(num_steps):
+                # learning on: layer 2 learns (learn_l2 True), layer 1 runs frozen (learn_l1 False)
                 out = model(spike_data[t])
                 bts += out
                 if l1_usage is not None: l1_usage += model.last_l1_spikes.view(B, -1, model.l1.F).sum(dim=(0, 1))   # type: ignore
             spikes_since += bts.sum(0); total += B
+            # snapshot at batch 0 and then every snapshot_interval batches (100 batches = 3,200 images by default)
             if gbi % snapshot_interval == 0:
+                # labels from train images 0-1999, accuracy on test images 0-999 and on their shifted copies, learning off: the
+                # hypothesis-work estimator
                 labels = assign_neuron_labels(model, assign_loader, device, num_steps)
                 acc, cm = evaluate_network(model, eval_loader, labels, device, num_steps, return_matrix=True)   # type: ignore
                 acc_s = evaluate_network(model, shifted_loader, labels, device, num_steps) if shifted_loader is not None else float("nan")
                 with torch.no_grad():
+                    # Weight diagnostics: top-k share and theta of every neuron; dw = how far each row moved since the last snapshot; hijacker
+                    # index = share of all that movement carried by the 20 rows that moved most (the hypothesis-work measure).
                     W = model.l2.synapses.weight.detach()
                     sharp = template_sharpness(W, k2).numpy(); th = model.l2.neurons.theta.detach().float().cpu().numpy().copy()   # type: ignore
                     dw = torch.linalg.norm((W - W_prev).float().cpu(), dim=1); tot = float(dw.sum())
                     hij = float(torch.topk(dw, min(20, n)).values.sum()) / tot if tot > 0 else float("nan"); W_prev = W.clone()
                     ws = spikes_since.cpu().numpy().copy(); spikes_since.zero_()
+                # Two "untrained" counts: the old one (top-k share < 0.35, which sparse inputs cap) and the criterion-free one (rows whose
+                # cosine to their own initial weights is still > 0.95).
                 newly = (sharp >= 0.35) & np.isnan(recruit_step); recruit_step[newly] = total
                 res = int((sharp < 0.35).sum())
                 ci = cosine_to_init(W, W_init).numpy(); res_init = int((ci > 0.95).sum()); CI.append(ci.astype(np.float32)); RI.append(res_init)
@@ -567,12 +786,19 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
                 C.append(np.asarray(cm).astype(np.int32)); L.append(labels.cpu().numpy().astype(np.int16))
                 WS.append(ws.astype(np.float32)); TH.append(th.astype(np.float32)); SH.append(sharp.astype(np.float32)); RC.append(recruit_step.copy())
                 if l1_usage is not None: L1U.append(l1_usage.cpu().numpy().astype(np.float32)); l1_usage.zero_()
+                # Console readouts. distinct = mean, over the images of the LAST batch, of how many different layer-2 neurons fired (1 = one
+                # neuron took the presentation). The spikes-per-presentation numbers divide by snapshot_interval x B; at the very first
+                # snapshot (batch 0) only one batch has been counted, which is why the first logged value is ~1/100 of the real one.
                 distinct = float((bts > 0).sum(dim=1).float().mean())
                 l1_rate = (float(L1U[-1].sum()) / max(1, snapshot_interval * B)) if L1U else float("nan")
                 print(f"[layer 2] {total:>7d} ex | held-out acc {acc:5.1f}% shifted {acc_s:5.1f}% | reservoir {res:3d} (unmoved rows {res_init:3d}, cos-to-init med {np.median(ci):.2f}) | hijacker idx {hij:4.2f} | "
                       f"L2 spikes/presentation {ws.sum() / max(1, snapshot_interval * B):5.1f} from {distinct:4.1f} distinct neurons (last batch) | L1 spikes/presentation {l1_rate:5.1f} | {(time.time() - t0) / 60:5.1f} min")
             gbi += 1
     print("Training complete")
+    # Summary for run.json and the plotting code (multi_layer_plots.py, adapted from test2/test4). spike_time = when the accuracy
+    # curve shows the hypothesis-work "spike" (NaN if none); final accuracy = mean of the last 3 snapshots. Several keys here
+    # and in the npz (intervention_step_actual, anneal_step_actual, n_refill, theta_plus_late, cooper_*, imprinted, refilled)
+    # are placeholders those figures expect; they are unused in this script.
     spike_time = spike_time_from_curve(P, A)
     out = dict(cfg); out.update({
         "spike_time": spike_time, "intervention_step_actual": None, "anneal_step_actual": None,
@@ -583,6 +809,8 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
         "l1": None if l1_hist is None else {"converged_at": l1_hist["converged_at"], "frozen_at": l1_hist["frozen_at"], "minutes": l1_hist["minutes"],
                                             "P": model.l1.P, "F": model.l1.F, "K": model.l1.K, "side": model.l1.side},   # type: ignore
     })
+    if out["l1"] is not None and l1_hist is not None and l1_hist.get("acc"):   # layer 1's own accuracy at the freeze point
+        out["l1"]["readout_accuracy_at_freeze"] = l1_hist["acc"][-1]; out["l1"]["readout_accuracy_shifted_at_freeze"] = l1_hist["acc_shifted"][-1]
     empty = np.zeros(0, dtype=np.float32)
     npz = dict(points=np.array(P), accuracy=np.array(A), accuracy_shifted=np.array(S),
                cooper_points=empty, cooper_all=empty, cooper_proportion=empty,
@@ -591,12 +819,17 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
                imprinted=np.zeros(n, bool), refilled=np.zeros(n, bool),
                cos_init_snap=np.array(CI), reservoir_init=np.array(RI), W2_init=W_init.float().cpu().numpy().astype(np.float16),
                W2=model.l2.synapses.weight.detach().float().cpu().numpy().astype(np.float16))
+    # layer-1 arrays (templates, thetas, the stage-A history) are saved too, so a run can be analysed or replayed later
     if model.l1 is not None and l1_hist is not None:
         npz.update(W1=model.l1.templates().float().cpu().numpy().astype(np.float32), l1_theta=model.l1.theta.detach().float().cpu().numpy().astype(np.float32),
                    l1_usage_snap=np.array(L1U), l1_points=np.array(l1_hist["points"]), l1_sharp=np.array(l1_hist["sharp"]), l1_struct=np.array(l1_hist["struct"]), l1_dW=np.array(l1_hist["dW"]),
                    l1_theta_med=np.array(l1_hist["theta_med"]), l1_theta_p90=np.array(l1_hist["theta_p90"]), l1_usage=np.array(l1_hist["usage"]),
                    l1_active_frac=np.array(l1_hist["active_frac"]), l1_latency=np.array(l1_hist["latency"]), l1_reservoir=np.array(l1_hist["reservoir"]),
                    l1_distinct=np.array(l1_hist["distinct"]), l1_tie=np.array(l1_hist["tie"]), l1_spikes_per_window=np.array(l1_hist["spikes_per_window"]))
+        # stage-A accuracy with layer 1 as the output layer (x = layer-1 training images; empty if stage A was not scored)
+        npz.update(l1_acc_points=np.array(l1_hist.get("acc_points", [])), l1_accuracy=np.array(l1_hist.get("acc", [])),
+                   l1_accuracy_shifted=np.array(l1_hist.get("acc_shifted", [])))
+    # run.npz holds every array, run.json the config plus the summary numbers; then the F-figures are drawn
     np.savez(run_dir / "run.npz", **npz)
     (run_dir / "run.json").write_text(json.dumps(out, indent=2))
     make_run_figures(run_dir)
@@ -605,11 +838,13 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
 
 # =====================================================================================================================
 def main() -> None:
+    # Command-line flags. The defaults are the batch-1 design; the batch-specific values come from unity/submit_multi_layer.sh.
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     # ---- layer 1 ----
     p.add_argument("--no-l1", action="store_true", help="single-layer reference: pixels straight to layer 2 (784 inputs, norm 78.4, wmax 1)")
     p.add_argument("--patch", type=int, default=7); p.add_argument("--stride", type=int, default=3); p.add_argument("--features", type=int, default=16)
     p.add_argument("--shared", action="store_true", help="tie the templates across positions (the shared design; default here is unshared / locally connected)")
+    # --l1-theta-tau is in training EXAMPLES; it is converted to timesteps in the build section below
     p.add_argument("--l1-theta-plus", type=float, default=0.1); p.add_argument("--l1-theta-tau", type=float, default=2000.0, help="layer-1 theta decay in examples (0 = off)")
     p.add_argument("--l1-theta-shared", action="store_true", help="one theta per feature (global conscience) instead of per neuron")
     p.add_argument("--l1-norm", type=float, default=12.0, help="layer-1 template row sum (mean weight ~0.25 over 49 inputs)"); p.add_argument("--l1-wmax", type=float, default=1.5)
@@ -618,6 +853,7 @@ def main() -> None:
     p.add_argument("--l1-stop-stationary", action="store_true", default=True); p.add_argument("--l1-no-early-stop", dest="l1_stop_stationary", action="store_false")
     p.add_argument("--pool2", action="store_true", help="2x2 spike-OR pooling between the layers")
     # ---- layer 2 ----
+    # --theta-tau (layer 2) is also in examples; None = no decay (the base file's 1e7-timestep constant)
     p.add_argument("--neurons", type=int, default=400); p.add_argument("--theta-plus", type=float, default=0.5); p.add_argument("--theta-tau", type=float, default=None)
     p.add_argument("--inhibition", type=float, default=200.0)
     p.add_argument("--l2-wta", action="store_true", help="hard winner-take-all per timestep in layer 2 (resolves simultaneous crossings caused by layer 1's synchronous bursts); off = baseline behaviour")
@@ -630,15 +866,21 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=2); p.add_argument("--shift", type=int, default=2, help="max |dx|,|dy| of the shifted test set (0 = none)")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--steps", type=int, default=350); p.add_argument("--snapshot-interval", type=int, default=100)
     p.add_argument("--tag", default=""); p.add_argument("--smoke", action="store_true"); p.add_argument("--replot", default=None, metavar="RUN_DIR")
+    p.add_argument("--results-dir", default="results", help="folder that receives the run folder: relative to this script's folder "
+                   "(e.g. results_2, results/smoke_tests) or absolute")
     args = p.parse_args()
+    # --replot only redraws the figures of an existing run folder
     if args.replot:
         print("figures regenerated:", make_run_figures(args.replot)); return
 
+    # Seeds for Python, numpy and torch (weight initialisation, Poisson spikes, shuffling). MPS and CUDA still draw different
+    # random numbers from the same seed.
     random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
     if torch.backends.mps.is_available(): device = torch.device("mps"); print("Using MPS.")
     elif torch.cuda.is_available(): device = torch.device("cuda"); print("Using CUDA.")
     else: device = torch.device("cpu"); print("Using CPU.")
 
+    # --smoke: tiny settings to check the code path in a few minutes (640 training images, 25-ms presentations)
     if args.smoke:
         train_subset = Subset(train_dataset, range(0, 32 * 20)); assign_subset = Subset(train_dataset, range(0, 128)); eval_subset = Subset(test_dataset, range(0, 64))
         assign_bs = eval_bs = 128; args.epochs, args.steps, args.snapshot_interval = 1, 25, 5
@@ -646,6 +888,9 @@ def main() -> None:
     else:
         train_subset = train_dataset; assign_subset = Subset(train_dataset, range(0, 2000)); eval_subset = Subset(test_dataset, range(0, 1000))
         assign_bs = eval_bs = 512; n_shift = 1000
+    # Loaders. train_loader feeds stage B; l1_loader feeds stage A and the calibration, shuffled with a different seed (seed +
+    # 1000) so the two stages see the images in different orders. assign/eval: train 0-1999 and test 0-999 in a fixed order
+    # (the hypothesis-work estimator); shifted_loader: the same test images, shifted.
     gen = torch.Generator().manual_seed(args.seed)
     train_loader = DataLoader(train_subset, batch_size=32, shuffle=True, generator=gen)
     l1_loader = DataLoader(train_subset, batch_size=32, shuffle=True, generator=torch.Generator().manual_seed(args.seed + 1000))
@@ -653,19 +898,28 @@ def main() -> None:
     shifted_loader = DataLoader(shifted_test_set(n_shift, args.shift), batch_size=eval_bs, shuffle=False) if args.shift > 0 else None
 
     # ---- build ----
+    # --no-l1: the single-layer reference, i.e. the base network (784 inputs, row sum 78.4, w_max 1.0) with this script's
+    # evaluation
     if args.no_l1:
         l1 = None; n_in = 784; l2_norm = args.l2_norm or 78.4; l2_wmax = args.l2_wmax or 1.0
     else:
+        # theta decays once per timestep and a batch of 32 images is 350 timesteps, so tau examples = tau x 350 / 32 timesteps;
+        # tau <= 0 means 1e7 timesteps, i.e. no decay in practice. The layer-1 learning rates are the base file's 1e-2 / 1e-4.
         tau1 = 1e7 if args.l1_theta_tau <= 0 else args.l1_theta_tau * args.steps / 32
         l1 = FeatureLayer(args.patch, args.stride, args.features, bool(args.shared), args.l1_theta_plus, tau1, args.l1_theta_shared,
                           args.l1_norm, args.l1_wmax, 1e-2, 1e-4, args.l1_inhibition, args.l1_stdp_reduce, wta=bool(args.l1_wta))
+        # Layer 2's input size: 256 pooled lines with --pool2, else 1,024. Its weight scale on the next line is provisional (mean
+        # weight 0.1, w_max 1.0, the base file's values); calibrate_layer2() replaces it after stage A unless --l2-norm/--l2-wmax.
         n_in = (l1.side // 2) ** 2 * l1.F if args.pool2 else l1.N
         l2_norm = args.l2_norm or 0.1 * n_in; l2_wmax = args.l2_wmax or 1.0     # provisional; replaced by the calibration after stage A unless overridden
+    # layer 2's theta decay, converted the same way; None -> 1e7 timesteps (the base file's value)
     tau2 = 1e7 if args.theta_tau is None else args.theta_tau * args.steps / 32
     l2 = DiehlAndCookNetwork(n_in, args.neurons, args.theta_plus, args.inhibition, tau2, None, l2_norm, l2_wmax, wta=bool(args.l2_wta))
     l2.lr_plus *= args.l2_lr_mult; l2.lr_minus *= args.l2_lr_mult      # both rates together, so the potentiation/depression ratio is unchanged
     model = TwoLayerNetwork(l1, l2, args.pool2).to(device)
 
+    # Run folder name: architecture, layer-2 theta settings, epochs, seed, then one tag per non-default option and a time stamp,
+    # e.g. unshared_p7s3f16_n400_tp0.5_tau30k_ep6_seed0_l1wta_l2wta_drv0.36_lr10_20261113-165859.
     variant = "singlelayer" if args.no_l1 else (f"{'shared' if args.shared else 'unshared'}_p{args.patch}s{args.stride}f{args.features}" + ("_pool2" if args.pool2 else ""))
     run_name = f"{variant}_n{args.neurons}_tp{args.theta_plus:g}" + (f"_tau{args.theta_tau / 1000:g}k" if args.theta_tau else "_nodecay") + f"_ep{args.epochs}_seed{args.seed}"
     if args.l1_wta: run_name += "_l1wta"
@@ -676,7 +930,10 @@ def main() -> None:
     if args.tag: run_name += f"_{args.tag}"
     if args.smoke: run_name += "_SMOKE"
     run_name += "_" + time.strftime("%Y%m%d-%H%M%S")
-    run_dir = results_root / run_name; run_dir.mkdir(parents=True, exist_ok=True)
+    out_root = Path(args.results_dir) if Path(args.results_dir).is_absolute() else script_dir / args.results_dir   # default: results_root
+    run_dir = out_root / run_name; run_dir.mkdir(parents=True, exist_ok=True)
+    # cfg is saved as run.json. Some keys (arm, sweep, multi, init, theta_init, anneal_at, ...) are fixed values that the
+    # plotting and summary code shared with the hypothesis-work scripts expects.
     cfg = {"arm": "baseline", "sweep": True, "multi": True, "seed": args.seed, "num_epochs": args.epochs, "num_steps": args.steps, "snapshot_interval": args.snapshot_interval,
            "batch_size": 32, "smoke": bool(args.smoke), "tag": args.tag, "run_name": run_name, "init": "uniform", "theta_init": None, "theta_tau": args.theta_tau,
            "theta_plus_arg": args.theta_plus, "inhibition_arg": args.inhibition, "theta_max": None, "anneal_at": None, "theta_plus_late": None,
@@ -685,11 +942,14 @@ def main() -> None:
            "l1_inhibition": args.l1_inhibition, "l1_stdp_reduce": args.l1_stdp_reduce, "l1_examples": args.l1_examples, "l1_snapshot": args.l1_snapshot,
            "l1_stop_stationary": bool(args.l1_stop_stationary), "l2_inputs": n_in, "l2_norm": l2_norm, "l2_wmax": l2_wmax, "shift": args.shift}
     print("config:", json.dumps(cfg))
-    l1_hist = train_layer1(model, l1_loader, device, cfg) if l1 is not None else None
+    # stage A (skipped for --no-l1)
+    l1_hist = train_layer1(model, l1_loader, device, cfg, (assign_loader, eval_loader, shifted_loader)) if l1 is not None else None
     if l1 is not None:
+        # Optional readout inhibition: layer 1 learned with --l1-inhibition; from here on it runs with this value instead.
         if args.l1_readout_inhibition is not None:
             model.l1.inhibition = float(args.l1_readout_inhibition)      # learning is frozen; only the readout competition changes (calibration below sees it)
             print(f"[layer 1] readout: within-window inhibition set to {model.l1.inhibition:g} mV for stage B and evaluation (was {args.l1_inhibition:g} during learning)")
+        # set layer 2's weight scale from layer 1's measured output rate (see calibrate_layer2)
         cal = calibrate_layer2(model, l1_loader, device, args.steps, args.l2_drive)
         if args.l2_norm is not None or args.l2_wmax is not None:      # explicit overrides win
             l2 = model.l2
@@ -698,8 +958,10 @@ def main() -> None:
                 l2.w_norm = args.l2_norm
             if args.l2_wmax is not None: l2.w_max = args.l2_wmax
             print(f"[calibration] overridden: row sum {l2.w_norm:.1f}, w_max {l2.w_max:.2f}")
+        # record the calibration and the final weight scale, and write run.json now, so a crash in stage B still leaves the config
         cfg.update(cal); cfg["l2_norm"] = model.l2.w_norm; cfg["l2_wmax"] = model.l2.w_max
         (run_dir / "run.json").write_text(json.dumps(cfg, indent=2))
+    # stage B (for --no-l1, the whole run)
     train_layer2(model, train_loader, assign_loader, eval_loader, shifted_loader, device, cfg, run_dir, l1_hist)
 
 

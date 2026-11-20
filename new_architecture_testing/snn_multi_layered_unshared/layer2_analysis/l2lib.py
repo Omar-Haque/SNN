@@ -42,9 +42,10 @@ class Net:
         self.seen = 0
 
     # -------------------------------------------------------------------------------------------------- one batch
-    def present(self, x, learn=True, return_l1=False, rng=None, probe=False):
+    def present(self, x, learn=True, return_l1=False, rng=None, probe=False, trace=False):
         rng = rng or self.rng; b = x.shape[0]; n = self.n; T = self.T
         if probe: return_l1 = True; t_first = np.full(b, -1); c1_first = np.zeros((b, self.n_in), np.float32)
+        if trace: tr_v = np.zeros((T, n), np.float32); tr_in = np.zeros(T, np.float32); tr_s = np.zeros((T, n), bool); tr_th = self.theta.copy()
         if not self.no_l1:
             v1 = np.full((b, self.P, self.F), E_REST, np.float32); p1 = np.zeros((b, self.P, self.F), np.float32)
             c1 = np.zeros((b, self.n_in), np.float32) if return_l1 else None
@@ -74,12 +75,14 @@ class Net:
             v2 = DECAY * (v2 - E_REST) + E_REST
             if learn: self.theta = -52.0 + (self.theta + 52.0) * self.th_decay
             v2 += (z @ WT) - self.l2_inh * (p2.sum(1, keepdims=True) - p2)
+            if trace: tr_v[t] = v2[0]; tr_in[t] = z[0].sum()
             s2 = v2 >= self.theta[None]
             any2 = s2.any()
             if any2:
                 if self.l2_wta:
                     comp = np.where(s2, v2, -np.inf); top = comp.argmax(1); m = np.zeros_like(s2); m[np.arange(b), top] = True; s2 &= m
                 v2[s2] = E_REST; p2 = s2.astype(np.float32); c2 += p2
+                if trace: tr_s[t] = s2[0]
                 if probe:
                     new = s2.any(1) & (t_first < 0); t_first[new] = t; c1_first[new] = c1[new]
             else:
@@ -104,6 +107,7 @@ class Net:
                     Wr = np.clip(W[rows], 0.0, self.w_max); Wr *= self.w_norm / Wr.sum(1, keepdims=True)
                     W[rows] = Wr; WT[:, rows] = Wr.T
         if learn: self.seen += b
+        if trace: return c2, tr_v, tr_in, tr_s, tr_th
         if probe: return c2, c1, t_first, c1_first
         return (c2, c1) if return_l1 else c2
 

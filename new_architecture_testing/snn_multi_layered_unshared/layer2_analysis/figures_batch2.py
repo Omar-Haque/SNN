@@ -7,7 +7,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "layer1_analysis"))   # l1lib.py lives there
-from l1lib import RESULTS
+from l1lib import find_run
 
 BLUE, ORANGE, AQUA, YELLOW, VIOLET, GRAY, INK, INK2 = "#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#6250d6", "#9a9893", "#0b0b0b", "#52514e"
 plt.rcParams.update({"font.size": 10, "axes.edgecolor": "#bdbbb5", "axes.labelcolor": INK, "xtick.color": INK2, "ytick.color": INK2, "axes.titleweight": "bold",
@@ -27,7 +27,7 @@ def smooth(y, k=3):
 fig, axes = plt.subplots(1, 3, figsize=(19, 5.6), gridspec_kw={"width_ratios": [1.35, 1, 1]})
 ax = axes[0]; ends = []
 for name, lab, col in RUNS:
-    d = np.load(RESULTS / name / "run.npz"); x = d["points"] / 1000; y = d["accuracy"]
+    d = np.load(find_run(name) / "run.npz"); x = d["points"] / 1000; y = d["accuracy"]
     ax.plot(x, y, color=col, linewidth=0.8, alpha=0.35); ax.plot(x, smooth(y), color=col, linewidth=2)
     ends.append([float(y[-3:].mean()), lab, col])
 ends.sort(key=lambda e: -e[0]); ypos = [e[0] for e in ends]

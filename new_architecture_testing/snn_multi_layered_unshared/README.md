@@ -38,7 +38,9 @@ neurons.
   if it is ~0 the drive is still too low (raise `--l2-drive`); if it is "59 from 59 distinct neurons" layer 2 is
   volleying and `--l2-wta` is needed.
 - F15 (stage A curves), F14 (the 16 templates at four windows: strokes, not blobs), F1 (held-out and shifted
-  accuracy), F13 (layer-2 templates projected to image space), `summary.csv` / S1 / S2.
+  accuracy; from 2026-11-15 on it starts at image 0: during stage A layer 1 is scored as the output layer (teal), after
+  the freeze layer 2 is (blue). F1–F7 use total training images on the x-axis, and a green dashed line marks the
+  end of stage A instead of the old "spike at" line), F13 (layer-2 templates projected to image space), `summary.csv` / S1 / S2.
 
 ## Diagnostics
 - `replay_layer1.py results/<run> [--inhibition X --no-wta --pooling]`: torch-free replay of the frozen layer 1 on test digits —

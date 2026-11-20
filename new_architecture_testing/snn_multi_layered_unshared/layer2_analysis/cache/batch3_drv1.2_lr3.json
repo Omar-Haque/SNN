@@ -1,0 +1,28 @@
+{
+ "run": "unshared_p7s3f16_n400_tp0.5_tau30k_ep6_seed0_l1wta_l2wta_lr3_20261113-165017",
+ "drive": 1.2,
+ "lr_mult": 3.0,
+ "readout": null,
+ "unity_final": 67.8,
+ "spiking": 70.7,
+ "race": 74.3,
+ "best_cosine": 81.10000000000001,
+ "silent": 0,
+ "win_purity": 0.8226773226773226,
+ "neurons_winning": 386,
+ "first_spike_ms": 29.0,
+ "input_spikes_before": 11.0,
+ "channels_before": 11.0,
+ "channels_total": 38.0,
+ "frac_channels": 0.2972972972972973,
+ "l2_spikes": 24.836999893188477,
+ "mean_weight": 1.2581924200057983,
+ "largest_weight_median": 10.67578125,
+ "threshold_distance": 75.65437316894531,
+ "weight_share_top5pct": 0.343296080827713,
+ "theta_p10_p50_p90": [
+  -3.024299144744873,
+  9.15689468383789,
+  24.77692413330078
+ ]
+}

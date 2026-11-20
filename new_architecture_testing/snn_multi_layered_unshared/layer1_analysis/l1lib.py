@@ -62,10 +62,18 @@ def structure(W, patch=7):
 
 
 # ------------------------------------------------------------------------------------------------ runs
+def find_run(name):
+    """A run folder by name: directly under RESULTS, or inside one of its group subfolders."""
+    if (RESULTS / name / "run.json").exists(): return RESULTS / name
+    hits = [p.parent for p in RESULTS.rglob("run.json") if p.parent.name == name]
+    if not hits: raise FileNotFoundError(f"no run named {name} under {RESULTS}")
+    return hits[0]
+
+
 class Run:
     def __init__(self, path):
         self.path = Path(path)
-        if not (self.path / "run.json").exists(): self.path = RESULTS / self.path.name      # "runs/<name>" -> ../results/<name>
+        if not (self.path / "run.json").exists(): self.path = find_run(self.path.name)        # "runs/<name>" -> ../results/[<group>/]<name>
         self.name = self.path.name
         self.cfg = json.loads((self.path / "run.json").read_text()); self.d = dict(np.load(self.path / "run.npz"))
         c = self.cfg; self.no_l1 = bool(c.get("no_l1"))

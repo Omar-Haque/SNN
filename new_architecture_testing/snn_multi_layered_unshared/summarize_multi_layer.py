@@ -31,14 +31,14 @@ def label(cfg):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--results", default=str(Path(__file__).resolve().parent / "results")); a = ap.parse_args()
     root = Path(a.results); rows = []
-    for r in sorted(root.iterdir()):
-        if not r.is_dir() or "SMOKE" in r.name or not (r / "run.json").exists(): continue
+    for r in sorted(p.parent for p in root.rglob("run.json")):          # runs may sit in group subfolders (01_batch1_..., etc.)
+        if "SMOKE" in r.name: continue
         try: d, cfg = load_run(r)
         except Exception as e: print("skip", r.name, e); continue
         pts, acc = d["points"], d["accuracy"]; sh = d.get("accuracy_shifted", np.full(len(pts), np.nan))
         l1 = cfg.get("l1") or {}
         ws = d["window_spikes"]; spp = float(ws[-1].sum() / (cfg["snapshot_interval"] * cfg["batch_size"]))
-        rows.append({"run": r.name, "variant": label(cfg), "seed": cfg["seed"], "l1_converged": l1.get("converged_at"), "l1_frozen_at": l1.get("frozen_at"),
+        rows.append({"group": r.parent.name if r.parent != root else "", "run": r.name, "variant": label(cfg), "seed": cfg["seed"], "l1_converged": l1.get("converged_at"), "l1_frozen_at": l1.get("frozen_at"),
                      "final_acc": float(np.mean(acc[-3:])), "final_shifted": float(np.nanmean(sh[-3:])), "shift_drop": float(np.mean(acc[-3:]) - np.nanmean(sh[-3:])),
                      "t78": spike_time_from_curve(pts, acc, 78.0), "max_acc": float(acc.max()), "spikes_per_presentation": spp,
                      "unmoved_rows_end": int(d["reservoir_init"][-1]) if "reservoir_init" in d else None,

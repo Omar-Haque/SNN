@@ -61,8 +61,13 @@ def _vlines(ax, cfg, spike_time):
     an = cfg.get('anneal_step_actual')   # test2: theta_plus switch
     if an is not None:
         ax.axvline(an, color='darkorange', linestyle='--', linewidth=1.2, label=f"θ+ → {cfg.get('theta_plus_late')} at {_k(an)}")
-    if spike_time == spike_time:  # not NaN
+    if spike_time == spike_time and not cfg.get('multi'):  # not NaN
         ax.axvline(spike_time, color='green', linestyle=':', linewidth=1.5, label=f"spike at {_k(spike_time)}")
+    # Multi-layer runs: no accuracy-spike line. A green dashed line marks the end of stage A instead (layer 1 frozen; from
+    # here on layer 2 is the output). The x-axis is total training images, so the line sits at the freeze point.
+    fz = (cfg.get('l1') or {}).get('frozen_at')
+    if cfg.get('multi') and fz:
+        ax.axvline(fz, color='green', linestyle='--', linewidth=1.5, label=f"end of stage A: layer 1 frozen at {_k(fz)}")
 
 
 def _run_desc(cfg):
@@ -149,18 +154,33 @@ def make_run_figures(run_dir):
     spike_time = spike_time_from_curve(pts, acc)
     cfg['spike_time'] = spike_time
     (run_dir / 'run.json').write_text(json.dumps(cfg, indent=2))
+    # Time axis = total training images, stage A then stage B. The stage-B arrays count layer-2 training images from 0, so
+    # they are shifted by the freeze point; recruitment times move with them, so neuron ages (differences) do not change.
+    # Single-layer runs (--no-l1) have no stage A and are not shifted.
+    off = float((cfg.get('l1') or {}).get('frozen_at') or 0)
+    if off:
+        for key in ('points', 'recruit_step_snap', 'cooper_points'): d[key] = d[key] + off
+        pts = d['points']
+    xlab = 'Training examples (stage A: layer 1 alone, then stage B: layer 2)' if off else 'Number of training examples'
 
     # ---- F1 accuracy ------------------------------------------------------------------------------------
     fig, ax = plt.subplots(figsize=(10, 5.5))
     if len(d['cooper_points']):
         ax.plot(d['cooper_points'], d['cooper_all'], color='tab:gray', linewidth=0.6, alpha=0.35, label='BindsNET "all" (raw, 224-sample windows)')
         ax.plot(d['cooper_points'], moving_average(d['cooper_all'], 15), color='tab:orange', linewidth=1.2, label='BindsNET "all" (15-window average)')
-    ax.plot(pts, acc, color='blue', linewidth=2, label='Held-out (assign 2k train / score 1k test)')
+    # Stage A: layer 1 is the output layer (its 1,024 neurons labelled and scored with the same estimator as layer 2)
+    if 'l1_accuracy' in d and len(d['l1_accuracy']):
+        ax.plot(d['l1_acc_points'], d['l1_accuracy'], color='teal', linewidth=2, marker='o', markersize=3,
+                label='stage A: layer 1 as the output (its 1,024 neurons labelled), held-out')
+        if np.isfinite(d['l1_accuracy_shifted']).any():
+            ax.plot(d['l1_acc_points'], d['l1_accuracy_shifted'], color='teal', linewidth=1.4, linestyle='--', alpha=0.8,
+                    label=f"stage A, same 1k test images shifted by up to ±{cfg.get('shift', 2)} px")
+    stage_b = 'stage B: layer 2 as the output, ' if off else ''
+    ax.plot(pts, acc, color='blue', linewidth=2, label=f"{stage_b}{'h' if off else 'H'}eld-out (assign 2k train / score 1k test)")
     if 'accuracy_shifted' in d and np.isfinite(d['accuracy_shifted']).any():   # multi_layer.py: the shifted test set
-        ax.plot(pts, d['accuracy_shifted'], color='purple', linewidth=1.6, linestyle='--', label=f"same 1k test images, shifted by up to ±{cfg.get('shift', 2)} px")
+        ax.plot(pts, d['accuracy_shifted'], color='purple', linewidth=1.6, linestyle='--', label=f"{'stage B, ' if off else ''}same 1k test images, shifted by up to ±{cfg.get('shift', 2)} px")
     _vlines(ax, cfg, spike_time)
-    ax.axhline(SPIKE_LEVEL, color='green', linewidth=0.6, alpha=0.4)
-    ax.set_xlabel('Number of training examples'); ax.set_ylabel('Accuracy (%)'); ax.grid(True, linestyle='--', alpha=0.5)
+    ax.set_xlabel(xlab); ax.set_ylabel('Accuracy (%)'); ax.grid(True, linestyle='--', alpha=0.5)
     _titles(ax, 'Held-out accuracy', cfg); ax.legend(loc='lower right', fontsize=9)
     _footer(fig, cfg); fig.tight_layout(rect=(0, 0.025, 1, 1)); fig.savefig(run_dir / 'F1_accuracy.png', dpi=150); plt.close(fig)
 
@@ -168,7 +188,7 @@ def make_run_figures(run_dir):
     fig, ax = plt.subplots(figsize=(10, 5.5))
     ax.plot(pts, d['reservoir_count'], color='black', linewidth=2, label=f"untrained neurons (top-{cfg.get('top_k', 100)} share < 0.35; capped for sparse inputs)")
     if 'reservoir_init' in d: ax.plot(pts, d['reservoir_init'], color='black', linewidth=1.5, linestyle='--', label='rows that have not moved from their initialisation (cosine > 0.95)')
-    ax.set_ylabel('Untrained neurons (reservoir)'); ax.set_xlabel('Number of training examples'); ax.grid(True, linestyle='--', alpha=0.5)
+    ax.set_ylabel('Untrained neurons (reservoir)'); ax.set_xlabel(xlab); ax.grid(True, linestyle='--', alpha=0.5)
     ax2 = ax.twinx(); ax2.plot(pts, acc, color='blue', alpha=0.35, linewidth=1.5, label='held-out accuracy'); ax2.set_ylabel('Accuracy (%)', color='blue')
     _vlines(ax, cfg, spike_time)
     h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels(); ax.legend(h1 + h2, l1 + l2, loc='center left', fontsize=9)
@@ -178,7 +198,7 @@ def make_run_figures(run_dir):
     # ---- F3 hijacker index --------------------------------------------------------------------------------
     fig, ax = plt.subplots(figsize=(10, 5.5))
     ax.plot(pts, d['hijack_index'], color='purple', linewidth=2, label='share of weight change carried by the 20 biggest movers')
-    ax.set_ylim(0, 1); ax.set_ylabel('Hijacker index'); ax.set_xlabel('Number of training examples'); ax.grid(True, linestyle='--', alpha=0.5)
+    ax.set_ylim(0, 1); ax.set_ylabel('Hijacker index'); ax.set_xlabel(xlab); ax.grid(True, linestyle='--', alpha=0.5)
     ax2 = ax.twinx(); ax2.plot(pts, acc, color='blue', alpha=0.35, linewidth=1.5, label='held-out accuracy'); ax2.set_ylabel('Accuracy (%)', color='blue')
     _vlines(ax, cfg, spike_time)
     h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels(); ax.legend(h1 + h2, l1 + l2, loc='center right', fontsize=9)
@@ -202,7 +222,7 @@ def make_run_figures(run_dir):
     bx.plot(pts, young_share, color='darkorange', linewidth=2, label=f'% of window spikes from neurons recruited < {_k(YOUNG_AGE)} ago')
     bx.plot(pts, untrained_share, color='gray', linewidth=1.5, label='% of window spikes from untrained neurons')
     bx.set_title("Where each window's spikes come from", loc='left', fontsize=12, fontweight='bold')
-    bx.set_ylabel('% of spikes in window'); bx.set_xlabel('Number of training examples'); bx.grid(True, linestyle='--', alpha=0.5); bx.set_ylim(0, 100)
+    bx.set_ylabel('% of spikes in window'); bx.set_xlabel(xlab); bx.grid(True, linestyle='--', alpha=0.5); bx.set_ylim(0, 100)
     bx2 = bx.twinx(); bx2.plot(pts, acc, color='blue', alpha=0.35, linewidth=1.5); bx2.set_ylabel('Accuracy (%)', color='blue')
     _vlines(bx, cfg, spike_time); bx.legend(loc='upper right', fontsize=8)
     _footer(fig, cfg); fig.tight_layout(rect=(0, 0.025, 1, 1)); fig.savefig(run_dir / 'F4_winner_age.png', dpi=150); plt.close(fig)
@@ -233,7 +253,8 @@ def make_run_figures(run_dir):
     if ref.any() and cfg.get('intervention_step_actual') is not None:
         ax.scatter(np.full(ref.sum(), cfg['intervention_step_actual']), rows[ref], s=10, marker='<', color='white', label='re-initialised by intervention')
     _vlines(ax, cfg, spike_time)
-    ax.set_xlabel('Number of training examples'); ax.set_ylabel('Neurons, sorted by recruitment time (never trained at the bottom)')
+    if off: ax.set_xlim(left=off)   # the first column (one stage-B batch) would otherwise reach back past the freeze line
+    ax.set_xlabel(xlab); ax.set_ylabel('Neurons, sorted by recruitment time (never trained at the bottom)')
     _titles(ax, 'Window activity by recruitment order', cfg)
     ax.legend(loc='lower left', fontsize=8)
     _footer(fig, cfg); fig.tight_layout(rect=(0, 0.025, 1, 1)); fig.savefig(run_dir / 'F5_activity_by_recruitment.png', dpi=150); plt.close(fig)
@@ -256,7 +277,7 @@ def make_run_figures(run_dir):
     ax.plot(pts, pct(~trained, 50), color='black', linewidth=2, label='untrained neurons: median θ')
     ax.axhline(cfg['theta_base'], color='gray', linewidth=0.8, label=f"θ_base = {cfg['theta_base']} mV")
     _vlines(ax, cfg, spike_time)
-    ax.set_xlabel('Number of training examples'); ax.set_ylabel('θ (mV)'); ax.grid(True, linestyle='--', alpha=0.5)
+    ax.set_xlabel(xlab); ax.set_ylabel('θ (mV)'); ax.grid(True, linestyle='--', alpha=0.5)
     _titles(ax, 'Adaptive thresholds θ', cfg); ax.legend(loc='upper left', fontsize=8)
     _footer(fig, cfg); fig.tight_layout(rect=(0, 0.025, 1, 1)); fig.savefig(run_dir / 'F6_theta.png', dpi=150); plt.close(fig)
 
@@ -286,7 +307,8 @@ def make_run_figures(run_dir):
         ax.scatter(xs, ys, marker='x', color='black', s=40, label=f'class of the top winner when it is young (< {_k(YOUNG_AGE)})')
         ax.legend(loc='upper right', fontsize=8)
     _vlines(ax, cfg, spike_time)
-    ax.set_yticks(range(10)); ax.set_xlabel('Number of training examples'); ax.set_ylabel('Digit class')
+    if off: ax.set_xlim(left=off)   # the first column (one stage-B batch) would otherwise reach back past the freeze line
+    ax.set_yticks(range(10)); ax.set_xlabel(xlab); ax.set_ylabel('Digit class')
     _titles(ax, 'Class bias of the held-out predictions', cfg)
     _footer(fig, cfg); fig.tight_layout(rect=(0, 0.025, 1, 1)); fig.savefig(run_dir / 'F7_class_bias.png', dpi=150); plt.close(fig)
 
@@ -362,7 +384,7 @@ def make_run_figures(run_dir):
             for ax in (a3, a4, a5): ax.set_xlabel('Layer-1 training examples')
             for ax in (a1, a2, a3, a4, a5): ax.grid(True, linestyle='--', alpha=0.5)
             if cfg.get('l1') and cfg['l1'].get('frozen_at'):
-                for ax in (a1, a2, a3, a4, a5): ax.axvline(cfg['l1']['frozen_at'], color='black', linestyle=':', linewidth=1)
+                for ax in (a1, a2, a3, a4, a5): ax.axvline(cfg['l1']['frozen_at'], color='green', linestyle='--', linewidth=1.5)
             _footer(fig, cfg); fig.tight_layout(rect=(0, 0.025, 1, 1)); fig.savefig(run_dir / 'F15_layer1_stageA.png', dpi=150); plt.close(fig)
 
         # ---- F13 layer-2 templates projected back to image space ------------------------------------------------
