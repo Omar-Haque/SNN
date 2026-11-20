@@ -1,65 +1,26 @@
-Epoch 1 | Batch 0/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 0
-Evaluating network accuracy on test set...
-21.8 (eval took 68.1s)
-Epoch 1 | Batch 0/1875 processed. [32 samples, 72s elapsed]
-Epoch 1 | Batch 50/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 0
-Evaluating network accuracy on test set...
-49.7 (eval took 72.1s)
-Epoch 1 | Batch 100/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 3
-Evaluating network accuracy on test set...
-55.00000000000001 (eval took 76.4s)
-Epoch 1 | Batch 100/1875 processed. [3232 samples, 514s elapsed]
-Epoch 1 | Batch 150/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 17
-Evaluating network accuracy on test set...
-56.8 (eval took 73.8s)
-Epoch 1 | Batch 200/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 27
-Evaluating network accuracy on test set...
-65.0 (eval took 76.7s)
-Epoch 1 | Batch 200/1875 processed. [6432 samples, 926s elapsed]
-Epoch 1 | Batch 250/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 30
-Evaluating network accuracy on test set...
-67.10000000000001 (eval took 86.8s)
-Epoch 1 | Batch 300/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 29
-Evaluating network accuracy on test set...
-67.2 (eval took 70.8s)
-Epoch 1 | Batch 300/1875 processed. [9632 samples, 1376s elapsed]
-Epoch 1 | Batch 350/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 34
-Evaluating network accuracy on test set...
-69.89999999999999 (eval took 72.7s)
-Epoch 1 | Batch 400/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 28
-Evaluating network accuracy on test set...
-70.0 (eval took 67.4s)
-Epoch 1 | Batch 400/1875 processed. [12832 samples, 1818s elapsed]
-Epoch 1 | Batch 450/1875 | Estimating current accuracy...
-Assigning class labels to neurons
-Neuron assignments complete
-Unassigned neurons: 34
-Evaluating network accuracy on test set...
-70.39999999999999 (eval took 72.6s)
+/home/csigrist_umass_edu/SNN/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:497: UserWarning: Found GPU0 NVIDIA GeForce GTX 1080 Ti which is of compute capability (CC) 6.1.
+The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:
+- 7.5 which supports hardware CC >=7.5,<8.0
+- 8.0 which supports hardware CC >=8.0,<9.0
+- 8.6 which supports hardware CC >=8.6,<9.0
+- 9.0 which supports hardware CC >=9.0,<10.0
+- 10.0 which supports hardware CC >=10.0,<11.0 except {10.1}
+- 12.0 which supports hardware CC >=12.0,<13.0
+Your installed torch==2.15.0+cu132 does not include kernels for this GPU. Reinstall the same version against a CUDA build that does, e.g.:
+  For CUDA 12.6 use pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cu126
+  _warn_unsupported_code(d, device_cc, code_ccs)
+/home/csigrist_umass_edu/SNN/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:627: UserWarning: 
+NVIDIA GeForce GTX 1080 Ti with CUDA capability sm_61 is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities sm_75 sm_80 sm_86 sm_90 sm_100 sm_120.
+If you want to use the NVIDIA GeForce GTX 1080 Ti GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+
+  queued_call()
+Traceback (most recent call last):
+  File "/home/csigrist_umass_edu/SNN/src/snn_theta_plus_decay.py", line 52, in <module>
+    snn.train(model, loaders[0], loaders[2], loaders[3], loaders[1], device,
+  File "/home/csigrist_umass_edu/SNN/src/snn_exp.py", line 514, in train
+    cooper_assignments = -torch.ones(model.num_neurons, dtype=torch.long, device=device)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.AcceleratorError: CUDA error: no kernel image is available for execution on the device
+Search for `cudaErrorNoKernelImageForDevice' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
+
