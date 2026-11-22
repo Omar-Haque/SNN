@@ -2,7 +2,7 @@
 
 Nothing in the code is Mac-specific: every script picks `mps → cuda → cpu`, so on a Unity GPU node it prints
 "Using CUDA." and runs as-is. Results land in the same `results/` folders as on the Mac (batch 4 onward:
-`snn_multi_layered_unshared/results_2/`, set by `--results-dir`). (CUDA and MPS draw different
+`snn_multi_layered_unshared/results_2/<batch folder>/`, set by `--results-dir`). (CUDA and MPS draw different
 random numbers from the same seed, so a Unity run is a new seed in effect, not a bit-for-bit repeat of a Mac run.)
 
 ## One-time setup
@@ -39,7 +39,7 @@ Batch jobs, submitted from the repo root (`unity/run.sbatch` wraps any script; l
 ```
 sbatch unity/run.sbatch new_architecture_testing/snn_multi_layered_unshared/multi_layer_unshared.py --l1-wta --l2-wta --seed 0
 sbatch -p gpu-preempt -t 01:00:00 -J stdp unity/run.sbatch new_architecture_testing/STDP_testing/stdp_demo.py
-bash unity/submit_multi_layer.sh          # the current batch (batch 4 -> results_2/), as parallel jobs
+bash unity/submit_multi_layer.sh          # the current batch (the script's header names it and its results_2/ folder)
 bash unity/submit_multi_layer.sh smoke    # one short check job on tiny settings (results/smoke_tests/)
 squeue --me                               # state; PD = waiting, R = running
 tail -f unity/logs/<name>-<jobid>.out     # the console output you normally watch

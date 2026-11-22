@@ -924,6 +924,8 @@ def main() -> None:
     run_name = f"{variant}_n{args.neurons}_tp{args.theta_plus:g}" + (f"_tau{args.theta_tau / 1000:g}k" if args.theta_tau else "_nodecay") + f"_ep{args.epochs}_seed{args.seed}"
     if args.l1_wta: run_name += "_l1wta"
     if args.l1_readout_inhibition is not None and not args.no_l1: run_name += f"_rd{args.l1_readout_inhibition:g}"
+    if args.l1_norm != 12.0 and not args.no_l1: run_name += f"_l1n{args.l1_norm:g}"                # layer-1 row sum (drive)
+    if args.l1_theta_plus != 0.1 and not args.no_l1: run_name += f"_l1tp{args.l1_theta_plus:g}"    # layer-1 conscience
     if args.l2_wta: run_name += "_l2wta"
     if args.l2_drive != 1.2 and not args.no_l1: run_name += f"_drv{args.l2_drive:g}"
     if args.l2_lr_mult != 1.0: run_name += f"_lr{args.l2_lr_mult:g}"
