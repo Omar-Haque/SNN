@@ -56,11 +56,50 @@ inhibition, stage A up to 30,000 images.
 
 ## Run and summarise
 ```bash
-bash unity/submit_multi_layer.sh smoke     # optional: one short job (stride 2) on tiny settings -> results/smoke_tests/
-bash unity/submit_multi_layer.sh           # the six jobs
+git show db35bdd:unity/submit_multi_layer.sh   # the script now holds batch 6; this is batch 5's version
 python new_architecture_testing/snn_multi_layered_unshared/summarize_multi_layer.py \
     --results new_architecture_testing/snn_multi_layered_unshared/results_2     # summary.csv, S1, S2 in results_2/
 ```
 
-## Results
-(to be filled in when the runs finish)
+## Results (Unity, 2026-11-22)
+
+Accuracy: "epochs 4–6" = mean of every snapshot in epochs 4–6 (~28 snapshots; the steadiest number — the baselines agree
+to ±0.5 on it). Replay columns: the frozen layer 1 of each run replayed in numpy (`../../layer1_analysis/l1lib.py`) on 300
+test digits at the run's readout inhibition — layer-1 spikes per image, distinct channels (window × feature) that fired,
+features per active window, and code similarity (cosine of spike counts) for the same image shown twice and for the
+image shifted by 1 px.
+
+| run | last 3 | epoch 6 | epochs 4–6 | shifted, epochs 4–6 | layer 1 alone (shifted) | spikes / img | channels / img | features / window | same image | 1-px shift |
+|---|---|---|---|---|---|---|---|---|---|---|
+| single layer (batch 2) | 85.9 | 85.9 | 85.6 | 60.5 | – | – | – | – | 0.97 (pixels) | 0.75 (pixels) |
+| best, batch 3 | 82.3 | 83.0 | 82.1 | 56.7 | – | 308 | 36.6 | 1.00 | 0.75 | 0.39 |
+| best, batch 4 12-epoch run, at 6 epochs | 84.2 | 82.7 | 82.1 | 57.4 | 67.3 (48.1) | 308 | 36.6 | 1.00 | 0.75 | 0.39 |
+| best + 17.5 mV readout, batch 4 | 82.6 | 82.7 | 82.0 | 58.0 | 67.3 (48.1) | 324 | 71.3 | 1.95 | 0.97 | 0.56 |
+| **stride 2** | 84.8 | 84.5 | **84.6** | **59.2** | 67.2 (49.3) | 655 | 76.7 | 1.00 | 0.74 | 0.40 |
+| **readout inhibition 8 mV** | 85.6 | 84.9 | **84.2** | 56.9 | 67.3 (48.1) | 500 | 159.5 | 4.36 | 0.98 | 0.74 |
+| conscience ÷3 (θ⁺ 0.03) | 83.6 | 84.1 | 83.5 | 56.6 | 62.6 (45.3) | 377 | 37.3 | 1.00 | 0.75 | 0.43 |
+| readout inhibition 50 mV | 83.7 | 82.2 | 81.7 | 57.5 | 67.3 (48.1) | 308 | 36.6 | 1.00 | 0.75 | 0.39 |
+| layer-1 drive ×0.67 | 75.4 | 75.1 | 74.5 | 51.5 | 64.7 (47.9) | 198 | 33.9 | 1.00 | 0.80 | 0.42 |
+| layer-1 drive ×0.5 | 69.1 | 69.2 | 68.5 | 45.9 | 62.2 (45.3) | 135 | 30.9 | 1.00 | 0.82 | 0.42 |
+
+(Rows 2–3 and the 8 / 17.5 / 50 mV rows share the same seed-0 layer 1; only the readout differs. One seed per run.)
+
+- **Two changes clear the bar.** Stride 2: +2.5 held-out and +1.8–2.5 shifted (epochs 4–6), ahead in every epoch from the
+  first; now 1.0 point under the single layer held-out and 1.3 shifted. Readout inhibition 8 mV: +2.1 held-out, shifted
+  unchanged. The weaker conscience (+1.4, shifted −0.8) is inside the noise.
+- **Lowering the layer-1 drive backfires** (−7.6 and −13.6). It does make each window's choice slightly more repeatable
+  (same image 0.75 → 0.80 / 0.82), but fewer windows fire (36.6 → 33.9 / 30.9 per image) and layer 1 sends a third to a
+  half fewer spikes. Layer 2's calibration keeps its drive in mV per ms, so each spike is worth 1.5–2.3× more and layer 2
+  decides on correspondingly fewer of them — likely batch 3's readout problem coming back.
+- **50 mV behaves exactly like 200 mV**: it still silences the losing features for the rest of the presentation (1.00
+  feature per window), so nothing changed. Somewhere below ~20 mV the runners-up start to fire: 1.95 features per window
+  at 17.5 mV, 4.4 at 8 mV.
+- **Code stability was not the limit.** At 8 mV the code is as stable as raw pixels (0.98 / 0.74 vs pixels 0.97 / 0.75), but
+  shifted accuracy did not move; stride 2 left stability unchanged and gave the largest gain.
+- **What tracked accuracy across all eight conditions was how many spikes layer 1 sends per image**: 135 → 68.5 %,
+  198 → 74.5, 308 → 81.7–82.1, 324 → 82.0, 377 → 83.5, 500 → 84.2, 655 → 84.6 — monotonic and saturating. It is not raw spike
+  count alone: batch 4's drive 0.24 made layer 2 integrate ~1.5× more spikes before deciding and did not help (82.2). The
+  two winners add spikes from *more channels* — overlapping windows (stride 2) or runner-up features (8 mV) — rather than
+  more repeats of the same ones. A working hypothesis, not yet tested directly.
+- **The ~25-point loss on ±2 px shifts behaves like the single layer's**: it did not follow the layer-1 code's shift
+  stability in any run. It looks like a property of layer 2's whole-digit templates, whatever they are built from.

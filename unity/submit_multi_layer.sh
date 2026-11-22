@@ -1,34 +1,34 @@
 #!/usr/bin/env bash
-# Batch 5 (2026-11-22): layer 1. Batch 4 put every layer-2 variant at 82-84 % (single layer 85.9 %), all with the same
-# ~24-point loss on shifted digits, so what is left points at layer 1's code: each window outputs the feature that crosses
-# threshold first, the features are near-copies of each other, and the race between them is often decided by Poisson
-# noise or a 1-px shift (layer1_analysis/README.md, sections 6-7). Six layer-1 changes on top of batch 4's layer-2 setting
-# (--l2-drive 0.36 --l2-lr-mult 10), one seed, same regime as batches 2-4. Runs go to
-# new_architecture_testing/snn_multi_layered_unshared/results_2/06_batch5_layer1_code_stability_6ep_20261122/
+# Batch 6 (2026-11-22): batch 5's two winners. Stride 2 (+2.5 points held-out, +2 shifted) and 8 mV layer-1 readout
+# inhibition (+2.1 held-out) each brought the two-layer network to within ~1-1.5 points of the single layer, one seed
+# each. This batch combines them (two seeds), repeats each on a second seed, pushes the readout to 4 mV, and tries 2x2
+# pooling on the 8 mV code (pooling failed in batch 4 on the 200 mV code, whose windows flip under a 1-px shift; at 8 mV
+# the code is as shift-stable as pixels). Layer-2 setting and regime as in batches 4-5. Runs go to
+# new_architecture_testing/snn_multi_layered_unshared/results_2/07_batch6_stride2_readout8_6ep_20261122/
 # (its README.md lists the questions).
-#   bash unity/submit_multi_layer.sh smoke     # optional: one short job on tiny settings (stride 2) -> results/smoke_tests/
+#   bash unity/submit_multi_layer.sh smoke     # optional: one short job (stride 2 + 8 mV) on tiny settings -> results/smoke_tests/
 #   bash unity/submit_multi_layer.sh           # the six jobs
 set -euo pipefail
 cd "$(dirname "$0")/.."                         # repo root
 S=new_architecture_testing/snn_multi_layered_unshared/multi_layer_unshared.py
-BEST="--l2-drive 0.36 --l2-lr-mult 10"          # batch 3/4's best layer-2 setting
-OUT=results_2/06_batch5_layer1_code_stability_6ep_20261122
+BEST="--l2-drive 0.36 --l2-lr-mult 10"          # the layer-2 setting of batches 3-5
+OUT=results_2/07_batch6_stride2_readout8_6ep_20261122
 
 if [ "${1:-}" = "smoke" ]; then
-    sbatch -p gpu-preempt -t 00:30:00 -J ml7_smoke unity/run.sbatch $S --smoke --l1-wta --l2-wta --theta-tau 30000 $BEST --stride 2 --results-dir results/smoke_tests
+    sbatch -p gpu-preempt -t 00:30:00 -J ml7_smoke unity/run.sbatch $S --smoke --l1-wta --l2-wta --theta-tau 30000 $BEST --stride 2 --l1-readout-inhibition 8 --results-dir results/smoke_tests
     squeue --me
     exit 0
 fi
 
-COMMON="--l1-wta --l2-wta --theta-tau 30000 --epochs 6 --snapshot-interval 200 --seed 0 $BEST --results-dir $OUT"
-# --l1-wmax is scaled with --l1-norm so templates learn the same shape and only the drive changes
-sbatch -t 05:00:00 -J ml7_l1norm6   unity/run.sbatch $S $COMMON --l1-norm 6 --l1-wmax 0.75      # layer-1 drive x0.5: races decided on more input
-sbatch -t 05:00:00 -J ml7_l1norm8   unity/run.sbatch $S $COMMON --l1-norm 8 --l1-wmax 1.0       # layer-1 drive x0.67
-sbatch -t 05:00:00 -J ml7_rd8       unity/run.sbatch $S $COMMON --l1-readout-inhibition 8       # softer readout than 17.5 mV
-sbatch -t 05:00:00 -J ml7_rd50      unity/run.sbatch $S $COMMON --l1-readout-inhibition 50      # harder readout than 17.5 mV
-sbatch -t 05:00:00 -J ml7_l1tp0.03  unity/run.sbatch $S $COMMON --l1-theta-plus 0.03            # conscience /3: fewer near-copy features
-sbatch -t 08:00:00 -J ml7_stride2   unity/run.sbatch $S $COMMON --stride 2                      # 121 windows instead of 64: more overlap
+COMMON="--l1-wta --l2-wta --theta-tau 30000 --epochs 6 --snapshot-interval 200 $BEST --results-dir $OUT"
+sbatch -t 05:00:00 -J ml7_s2_rd8       unity/run.sbatch $S $COMMON --stride 2 --l1-readout-inhibition 8 --seed 0   # do the two gains add up?
+sbatch -t 05:00:00 -J ml7_s2_rd8_s1    unity/run.sbatch $S $COMMON --stride 2 --l1-readout-inhibition 8 --seed 1   # ... on a second seed
+sbatch -t 05:00:00 -J ml7_s2_s1        unity/run.sbatch $S $COMMON --stride 2 --seed 1                             # stride 2 alone, second seed
+sbatch -t 05:00:00 -J ml7_rd8_s1       unity/run.sbatch $S $COMMON --l1-readout-inhibition 8 --seed 1              # 8 mV alone, second seed
+sbatch -t 05:00:00 -J ml7_rd4          unity/run.sbatch $S $COMMON --l1-readout-inhibition 4 --seed 0              # softer still (same layer 1 as 8 / 17.5 / 50 / 200 mV)
+sbatch -t 05:00:00 -J ml7_pool2_rd8    unity/run.sbatch $S $COMMON --pool2 --l1-readout-inhibition 8 --seed 0      # can pooling buy shift tolerance on a stable code?
 squeue --me
+# --pool2 needs an even window grid: it works at stride 3 (8x8 windows), not at stride 2 (11x11).
 # afterwards, on the login node (from the repo root):
 #   conda activate snn && python new_architecture_testing/snn_multi_layered_unshared/summarize_multi_layer.py \
 #       --results new_architecture_testing/snn_multi_layered_unshared/results_2
