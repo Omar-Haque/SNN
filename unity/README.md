@@ -41,6 +41,7 @@ sbatch unity/run.sbatch new_architecture_testing/snn_multi_layered_unshared/mult
 sbatch -p gpu-preempt -t 01:00:00 -J stdp unity/run.sbatch new_architecture_testing/STDP_testing/stdp_demo.py
 bash unity/submit_multi_layer.sh          # the current batch (the script's header names it and its results_2/ folder)
 bash unity/submit_multi_layer.sh smoke    # one short check job on tiny settings (results/smoke_tests/)
+bash unity/submit_multi_layer.sh ml7_rd4 ml7_pool2_rd8   # resubmit only the jobs named (e.g. ones that failed)
 squeue --me                               # state; PD = waiting, R = running
 tail -f unity/logs/<name>-<jobid>.out     # the console output you normally watch
 scancel <jobid>
@@ -50,6 +51,13 @@ the older cards (GTX TITAN X, 1080 Ti, V100) that make up much of `gpu-preempt`,
 available for execution on the device". If you ever see that again: `pip install torch torchvision --index-url
 https://download.pytorch.org/whl/cu126` inside the `snn` env, or restrict jobs to newer cards with
 `--constraint=sm_75|sm_80|sm_86|sm_89|sm_90` (longer queue).
+
+Bad nodes: a job that dies at its very first CUDA call (e.g. `CUDA error: an illegal memory access was encountered` in
+`spikegen.rate`) while the same configuration runs elsewhere is a node problem, not the code. The log's `node` line
+names the node (`node gypsum-gpuXXX | gpu: ...`); add it to the `--exclude=` line in `run.sbatch` and resubmit the failed
+jobs by name. `gypsum-gpu083` is excluded since 2026-11-22 (all five batch-6 jobs sent there failed this way).
+A job that crashes leaves at most an empty run folder, which git does not see — so a failed job shows up as
+"nothing to commit"; check `sacct --starttime today -o JobName,State,NodeList,Elapsed` or the logs.
 
 Partitions: `gpu-preempt` for anything under 2 h (shortest wait; a preempted job is killed, and these scripts do not
 checkpoint, so resubmit), `gpu` for longer runs (up to 48 h). Replotting/summaries are light enough for the login node.
