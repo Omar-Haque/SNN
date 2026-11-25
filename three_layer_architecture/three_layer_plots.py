@@ -9,8 +9,14 @@ F3_layer2_features     layer-2 neurons drawn in pixel space: each weight x the l
                        template's window (a linear back-projection: what the weights favour, not exactly what makes it fire)
 F4_layer3_templates    the 20 most active layer-3 neurons drawn in pixel space through layers 2 and 1, with their labels
 F5_stages              per-stage diagnostics: layer-1 and layer-2 templates still unformed, layer-2 block activity, layer 3
+F6_layer2_sta          the same layer-2 neurons as F3, shown as the average pixel patch each one fired for on the 1,000 test
+                       digits (spike-triggered average): what actually drives the neuron, with no templates involved
+F7_layer3_sta          the same 20 layer-3 neurons as F4, as the average test digit each one fired for
+F6/F7 need the spike-triggered averages: saved in run.npz by three_layer.py, or in sta.npz by sta_replay.py for older runs.
+Standalone (no torch needed):  python three_layer_plots.py <run dir> [<run dir> ...]
 """
 import json
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -61,6 +67,30 @@ def l3_projection(W3_rows, proj2, cfg):
         qy, qx = divmod(q, side2); y0, x0 = qy * s2 * s1, qx * s2 * s1
         img[:, y0:y0 + c, x0:x0 + c] += np.einsum("ng,gij->nij", W3r[:, q, :], P2[q])
     return img
+
+
+def l1_backprojection(rows, W1, cfg):
+    """(n, 28, 28) pixel-space picture of weight rows over layer 1's lines (--l3-skip): each weight x its layer-1 template."""
+    p1, s1, F1, side1 = cfg["l1_patch"], cfg["l1_stride"], cfg["l1_features"], cfg["l1_side"]
+    T1 = W1.reshape(side1 * side1, F1, p1 * p1).astype(np.float32); R = rows.reshape(len(rows), side1 * side1, F1).astype(np.float32)
+    img = np.zeros((len(rows), 28, 28), np.float32)
+    for p in range(side1 * side1):
+        wy, wx = divmod(p, side1)
+        img[:, wy * s1:wy * s1 + p1, wx * s1:wx * s1 + p1] += np.einsum("nf,fk->nk", R[:, p], T1[p]).reshape(-1, p1, p1)
+    return img
+
+
+def load_sta(d, run_dir):
+    """The spike-triggered averages: from run.npz (three_layer.py) or sta.npz (sta_replay.py, for older runs); None if absent."""
+    if "sta2" in d: return {k: d[k] for k in ("sta2", "sta2_count", "sta3", "sta3_count")}
+    f = Path(run_dir) / "sta.npz"
+    return dict(np.load(f)) if f.exists() else None
+
+
+def layer2_columns(th2, q, F2, n_max=16):
+    """The features of block q to show: all of them, or the n_max that won most (largest theta rise), in index order."""
+    if F2 <= n_max: return list(range(F2))
+    return sorted(np.argsort(-th2[q * F2:(q + 1) * F2])[:n_max].tolist())
 
 
 def _footer(fig, cfg):
@@ -115,33 +145,46 @@ def make_figures(run_dir):
     th2 = d["th2"]
     mid2 = side2 // 2
     blocks = sorted({mid2 * side2 + mid2, mid2, mid2 * side2, (side2 - 1) * side2 + mid2})
-    fig, axes = plt.subplots(len(blocks), F2, figsize=(1.0 * F2, 1.25 * len(blocks)))
+    ncol = min(F2, 16)
+    fig, axes = plt.subplots(len(blocks), ncol, figsize=(1.0 * ncol, 1.25 * len(blocks)), squeeze=False)
     c = proj2.shape[-1]; o = cfg["l2_stride"] * cfg["l1_stride"]
     for r, q in enumerate(blocks):
-        for f in range(F2):
-            a = axes[r, f] if len(blocks) > 1 else axes[f]; a.axis("off")
+        for j, f in enumerate(layer2_columns(th2, q, F2)):
+            a = axes[r, j]; a.axis("off")
             a.imshow(proj2[q * F2 + f], cmap="gray")
             a.set_title(f"θ+{th2[q * F2 + f] + 52:.1f}", fontsize=6)
-            if f == 0:
+            if j == 0:
                 qy, qx = divmod(q, side2)
                 a.text(-0.15, 0.5, f"block ({qy},{qx})\npx rows {qy * o}–{qy * o + c - 1}\ncols {qx * o}–{qx * o + c - 1}", fontsize=7,
                        ha="right", va="center", transform=a.transAxes)
     fig.suptitle(f"Layer-2 features in pixel space ({cfg['l2_block']}×{cfg['l2_block']} layer-1 windows = {c}×{c} px); "
-                 "title = θ rise in mV (higher = wins more); each image scaled to its own range", fontsize=8.5)
+                 "title = θ rise in mV (higher = wins more); each image scaled to its own range"
+                 + (f"; the {ncol} of {F2} features per block that won most" if F2 > ncol else ""), fontsize=8.5)
     _footer(fig, cfg); fig.subplots_adjust(left=0.1, right=0.99, top=0.88, bottom=0.04, hspace=0.45, wspace=0.15)
     fig.savefig(run_dir / "F3_layer2_features.png", dpi=150); plt.close(fig)
 
     # ---- F4 layer-3 templates in pixel space ------------------------------------------------------------------------
     ws = d["window_spikes"][-1] if len(d["window_spikes"]) else np.zeros(len(W3))
     order = np.argsort(-ws)[:20]
-    imgs = l3_projection(W3[order], proj2, cfg)
     lab = d["labels"] if len(d["labels"]) else np.full(len(W3), -1)
+    skip = bool(cfg.get("l3_skip")); N1 = cfg["l1_neurons"]
     fig, axes = plt.subplots(2, 10, figsize=(15, 4.2))
-    for i, a in enumerate(axes.ravel()):
-        a.axis("off")
-        if i < len(order): a.imshow(imgs[i], cmap="gray"); a.set_title(f"n{order[i]} → {lab[order[i]]}", fontsize=8)
-    fig.suptitle("Layer-3 templates in pixel space, through layers 2 and 1 (20 most active neurons; title = neuron → assigned digit)", fontsize=9)
-    _footer(fig, cfg); fig.tight_layout(rect=(0, 0.03, 1, 0.93)); fig.savefig(run_dir / "F4_layer3_templates.png", dpi=150); plt.close(fig)
+    if not skip:
+        imgs = l3_projection(W3[order], proj2, cfg)
+        for i, a in enumerate(axes.ravel()):
+            a.axis("off")
+            if i < len(order): a.imshow(imgs[i], cmap="gray"); a.set_title(f"n{order[i]} → {lab[order[i]]}", fontsize=8)
+        fig.suptitle("Layer-3 templates in pixel space, through layers 2 and 1 (20 most active neurons; title = neuron → assigned digit)", fontsize=9)
+    else:                    # skip connection: the two pathways drawn separately for the 10 most active neurons
+        o10 = order[:10]; via2 = l3_projection(W3[o10][:, N1:], proj2, cfg); via1 = l1_backprojection(W3[o10][:, :N1], W1, cfg)
+        share = W3[o10][:, N1:].sum(1) / W3[o10].sum(1)
+        for i in range(len(o10)):
+            for r, (img, t) in enumerate(((via2[i], f"n{o10[i]} → {lab[o10[i]]}\nvia layer 2 ({100 * share[i]:.0f} %)"), (via1[i], "via layer 1"))):
+                a = axes[r, i]; a.axis("off"); a.imshow(img, cmap="gray"); a.set_title(t, fontsize=7)
+        fig.suptitle("Layer-3 templates in pixel space, by pathway (--l3-skip; 10 most active neurons; % = share of the neuron's weight on layer-2 lines)", fontsize=9)
+    _footer(fig, cfg); fig.tight_layout(rect=(0, 0.03, 1, 0.93))
+    if skip: fig.subplots_adjust(hspace=0.45)
+    fig.savefig(run_dir / "F4_layer3_templates.png", dpi=150); plt.close(fig)
 
     # ---- F5 per-stage diagnostics -----------------------------------------------------------------------------------
     fig, axes = plt.subplots(2, 3, figsize=(17, 7.5)); (a1, a2, a3), (a4, a5, a6) = axes
@@ -170,3 +213,39 @@ def make_figures(run_dir):
     a6.set_xlabel("layer-3 training images")
     for a in (a1, a2, a3, a4, a5, a6): a.grid(True, ls="--", alpha=0.5)
     _footer(fig, cfg); fig.tight_layout(rect=(0, 0.02, 1, 1)); fig.savefig(run_dir / "F5_stages.png", dpi=150); plt.close(fig)
+
+    sta = load_sta(d, run_dir)
+    if sta is None: return
+    # ---- F6 layer-2 spike-triggered averages (same neurons and layout as F3) ---------------------------------------
+    S2, n2 = sta["sta2"], sta["sta2_count"]; cs = S2.shape[-1]
+    fig, axes = plt.subplots(len(blocks), ncol, figsize=(1.0 * ncol, 1.25 * len(blocks)), squeeze=False)
+    for r, q in enumerate(blocks):
+        for j, f in enumerate(layer2_columns(th2, q, F2)):
+            a = axes[r, j]; a.axis("off"); n = q * F2 + f
+            if n2[n] > 0: a.imshow(S2[n].reshape(cs, cs), cmap="gray")
+            else: a.imshow(np.zeros((cs, cs)), cmap="gray", vmin=0, vmax=1)
+            a.set_title(f"{int(n2[n])} spk", fontsize=6)
+            if j == 0:
+                qy, qx = divmod(q, side2)
+                a.text(-0.15, 0.5, f"block ({qy},{qx})\npx rows {qy * o}–{qy * o + cs - 1}\ncols {qx * o}–{qx * o + cs - 1}", fontsize=7,
+                       ha="right", va="center", transform=a.transAxes)
+    fig.suptitle(f"Layer 2: the average {cs}×{cs} pixel patch each neuron fired for (spike-triggered average over the 1,000 test digits; "
+                 "same neurons as F3; title = spikes; black = never fired)", fontsize=8.5)
+    _footer(fig, cfg); fig.subplots_adjust(left=0.1, right=0.99, top=0.88, bottom=0.04, hspace=0.45, wspace=0.15)
+    fig.savefig(run_dir / "F6_layer2_sta.png", dpi=150); plt.close(fig)
+
+    # ---- F7 layer-3 spike-triggered averages (same neurons as F4) ---------------------------------------------------
+    S3, n3 = sta["sta3"], sta["sta3_count"]
+    fig, axes = plt.subplots(2, 10, figsize=(15, 4.2))
+    for i, a in enumerate(axes.ravel()):
+        a.axis("off")
+        if i < len(order):
+            n = order[i]; a.imshow(S3[n] if n3[n] > 0 else np.zeros((28, 28)), cmap="gray")
+            a.set_title(f"n{n} → {lab[n]}, {int(n3[n])} spk", fontsize=8)
+    fig.suptitle("Layer 3: the average test digit each neuron fired for (spike-triggered average; same neurons as F4)", fontsize=9)
+    _footer(fig, cfg); fig.tight_layout(rect=(0, 0.03, 1, 0.93)); fig.savefig(run_dir / "F7_layer3_sta.png", dpi=150); plt.close(fig)
+
+
+if __name__ == "__main__":
+    for rd in sys.argv[1:]:
+        make_figures(rd); print("figures written:", rd)

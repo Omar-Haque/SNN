@@ -21,7 +21,11 @@ LAYER 3  The two-layer study's top layer: the D&C layer (400 neurons, all-to-all
 TRAINING  stage A: layer 1 alone (the two-layer study's train_layer1), then freeze; stage A2: layer 2 on the frozen layer 1,
           then freeze; stage B: layer 3 for --epochs epochs. Every stage is scored with its own top layer as the output
           (labels from train images 0-1999, accuracy on test images 0-999 and on the same images shifted by up to +-2 px),
-          so F1's accuracy curve runs across all three stages; green dashed lines mark the two freezes.
+          so F1's accuracy curve runs across all three stages; green dashed lines mark the two freezes. At the end, the
+          spike-triggered averages (the average pixel patch / image each layer-2 / layer-3 neuron fired for, on the 1,000
+          test digits) are saved for F6 / F7.
+OPTIONS   --l3-skip: layer 3 also reads layer 1's output (a skip connection). --l1-a2-inhibition: layer 1's inhibition while
+          layer 2 learns (default = its readout inhibition), e.g. 200 to train layer 2 on the one-feature-per-window code.
 
 USAGE  python three_layer.py                      # the default configuration
        python three_layer.py --smoke              # tiny settings: checks the whole code path in a few minutes
@@ -90,15 +94,20 @@ class BlockLayer(FeatureLayer):
 
 class ThreeLayerNetwork(nn.Module):
     """Layer 1 -> layer 2 -> layer 3, all in the same millisecond (no delays). Exposes the interface the estimators use
-    (reset, forward -> layer-3 spikes, num_neurons) and, for the two-layer study's train_layer1, .l1 / .learn_l1 / .learn_l2."""
-    def __init__(self, l1: FeatureLayer, l2: BlockLayer, l3: DiehlAndCookNetwork):
+    (reset, forward -> layer-3 spikes, num_neurons) and, for the two-layer study's train_layer1, .l1 / .learn_l1 / .learn_l2.
+    skip = True (--l3-skip): layer 3 reads layer 1's output as well as layer 2's -- input [layer-1 spikes, layer-2 spikes],
+    lines 0..N1-1 from layer 1 and N1.. from layer 2."""
+    def __init__(self, l1: FeatureLayer, l2: BlockLayer, l3: DiehlAndCookNetwork, skip: bool = False):
         super().__init__()
-        self.l1, self.l2, self.l3 = l1, l2, l3
+        self.l1, self.l2, self.l3, self.skip = l1, l2, l3, skip
         self.learn_l1, self.learn_l2, self.learn_l3 = True, False, False   # each stage switches on its own layer only
 
     @property
     def num_neurons(self) -> int:
         return self.l3.num_neurons
+
+    def l3_input(self, s1: torch.Tensor, s2: torch.Tensor) -> torch.Tensor:
+        return torch.cat([s1, s2], dim=1) if self.skip else s2
 
     def reset(self, batch_size: int, device: torch.device) -> None:
         self.l1.reset(batch_size, device); self.l2.reset(batch_size, device); self.l3.reset(batch_size, device)
@@ -106,7 +115,7 @@ class ThreeLayerNetwork(nn.Module):
     def forward(self, input_spikes: torch.Tensor, learning: bool = True) -> torch.Tensor:
         s1 = self.l1(input_spikes, learning=learning and self.learn_l1)
         s2 = self.l2(s1, learning=learning and self.learn_l2)
-        return self.l3(s2, learning=learning and self.learn_l3)
+        return self.l3(self.l3_input(s1, s2), learning=learning and self.learn_l3)
 
 
 class StackReadout(nn.Module):
@@ -182,8 +191,8 @@ def calibrate_layer2(model: ThreeLayerNetwork, loader: DataLoader, device: torch
 def calibrate_layer3(model: ThreeLayerNetwork, loader: DataLoader, device: torch.device, num_steps: int, target_drive: float,
                      n_batches: int = 5) -> dict:
     """The two-layer study's calibration, one layer up: measure the rate at which the frozen layers 1 + 2 feed layer 3 (input
-    spikes per ms per presentation, summed over lines) and set mean weight m = target_drive / rate; row sum = m x inputs;
-    w_max = 10 m. Rescales the random weights."""
+    spikes per ms per presentation, summed over lines -- layer 1's lines included with --l3-skip) and set mean weight
+    m = target_drive / rate; row sum = m x inputs; w_max = 10 m. Rescales the random weights."""
     l1, l2, l3 = model.l1, model.l2, model.l3
     tot = 0.0; pres = 0
     for bi, (data, _) in enumerate(loader):
@@ -192,7 +201,8 @@ def calibrate_layer3(model: ThreeLayerNetwork, loader: DataLoader, device: torch
         spike_data = spikegen.rate(data * 0.1, num_steps=num_steps).view(num_steps, B, 784)   # type: ignore
         l1.reset(B, device); l2.reset(B, device)
         for t in range(num_steps):
-            tot += float(l2(l1(spike_data[t], learning=False), learning=False).sum())
+            s1 = l1(spike_data[t], learning=False)
+            tot += float(model.l3_input(s1, l2(s1, learning=False)).sum())
         pres += B
     rate = tot / max(1, pres) / num_steps
     m = target_drive / max(rate, 1e-9)
@@ -203,6 +213,35 @@ def calibrate_layer3(model: ThreeLayerNetwork, loader: DataLoader, device: torch
     print(f"[calibration L3] layer 2 -> layer 3: {rate:.2f} spikes/ms per presentation over {l3.n_inputs} lines; mean weight {m:.3f} "
           f"(row sum {l3.w_norm:.1f}, w_max {l3.w_max:.2f}) for {target_drive} mV/ms")
     return info
+
+
+@torch.no_grad()
+def spike_triggered_averages(model: ThreeLayerNetwork, loader: DataLoader, device: torch.device, num_steps: int) -> dict:
+    """What actually makes the neurons fire: run the trained network (learning off, readout settings of stage B) on the
+    images of `loader` and average, for every layer-2 neuron, the pixel patch of its block area (c x c, c = l1 patch +
+    (block - 1) x l1 stride) weighted by how many times it fired on each image; for every layer-3 neuron, the whole 28x28
+    image weighted the same way. Unlike F3/F4 (weights drawn back through the layer-1 templates) this involves no
+    templates: it is the average input the neuron responded to. Counts = total spikes (0 -> the neuron never fired)."""
+    l1, l2, l3 = model.l1, model.l2, model.l3
+    c = l1.patch + (l2.block - 1) * l1.stride; o = l2.stride * l1.stride      # block area in pixels, and its step
+    s2sum = torch.zeros(l2.P, l2.F, c, c, device=device); n2 = torch.zeros(l2.P, l2.F, device=device)
+    s3sum = torch.zeros(l3.num_neurons, 28, 28, device=device); n3 = torch.zeros(l3.num_neurons, device=device)
+    for data, _ in loader:
+        B = data.shape[0]; data = data.to(device); img = data.view(B, 28, 28)
+        spike_data = spikegen.rate(data * 0.1, num_steps=num_steps).view(num_steps, B, 784)   # type: ignore
+        model.reset(B, device)
+        c2 = torch.zeros(B, l2.N, device=device); c3 = torch.zeros(B, l3.num_neurons, device=device)
+        for t in range(num_steps):
+            s1 = l1(spike_data[t], learning=False); s2 = l2(s1, learning=False)
+            c2 += s2; c3 += l3(model.l3_input(s1, s2), learning=False)
+        patches = torch.stack([img[:, (q // l2.side) * o:(q // l2.side) * o + c, (q % l2.side) * o:(q % l2.side) * o + c]
+                               for q in range(l2.P)], dim=1)                       # (B, P2, c, c)
+        c2 = c2.view(B, l2.P, l2.F)
+        s2sum += torch.einsum("bqf,bqij->qfij", c2, patches); n2 += c2.sum(0)
+        s3sum += torch.einsum("bn,bij->nij", c3, img); n3 += c3.sum(0)
+    sta2 = s2sum / n2.clamp(min=1.0)[..., None, None]; sta3 = s3sum / n3.clamp(min=1.0)[:, None, None]
+    return {"sta2": sta2.view(l2.N, c, c).cpu().numpy().astype(np.float32), "sta2_count": n2.view(-1).cpu().numpy(),
+            "sta3": sta3.cpu().numpy().astype(np.float32), "sta3_count": n3.cpu().numpy()}
 
 
 # =====================================================================================================================
@@ -317,6 +356,9 @@ def train_layer3(model: ThreeLayerNetwork, train_loader: DataLoader, loaders: tu
                       f"{SPP[-1]:5.1f} layer-3 spikes per presentation | θ med {TH[-1]:6.1f} | {n_lab}/{n} labelled | {(time.time() - t0) / 60:5.1f} min", flush=True)
             gbi += 1
     print("Training complete")
+    sta = spike_triggered_averages(model, loaders[1], device, T)          # on the 1,000 held-out test digits
+    W3f = l3.synapses.weight.detach().float()
+    share_l2 = float(W3f[:, l1.N:].sum() / W3f.sum()) if model.skip else None    # --l3-skip: layer 3's weight on layer-2 lines
     Pa, Aa, Sa = np.array(P), np.array(A), np.array(S)
     n_train = len(train_loader.dataset)                                  # type: ignore
     ep_acc = [float(Aa[(Pa > e * n_train) & (Pa <= (e + 1) * n_train)].mean()) if ((Pa > e * n_train) & (Pa <= (e + 1) * n_train)).any() else float("nan") for e in range(E)]
@@ -328,6 +370,8 @@ def train_layer3(model: ThreeLayerNetwork, train_loader: DataLoader, loaders: tu
         "epoch_accuracy": ep_acc, "epoch_accuracy_shifted": ep_sh,
         "last3_epochs_accuracy": float(Aa[last3].mean()), "last3_epochs_accuracy_shifted": float(np.nanmean(Sa[last3])),
         "final_l3_spikes_per_presentation": SPP[-1], "final_l3_unmoved_rows": UM[-1],
+        "l3_weight_share_l2": share_l2, "l3_weight_share_l2_at_start": (l2.N / (l1.N + l2.N)) if model.skip else None,
+        "l2_never_fired_on_test": int((sta["sta2_count"] == 0).sum()), "l3_never_fired_on_test": int((sta["sta3_count"] == 0).sum()),
         "l1": {"frozen_at": h1["frozen_at"], "converged_at": h1["converged_at"], "minutes": h1["minutes"], "P": l1.P, "F": l1.F, "K": l1.K, "side": l1.side,
                "readout_accuracy_at_freeze": h1["acc"][-1] if h1["acc"] else None, "readout_accuracy_shifted_at_freeze": h1["acc_shifted"][-1] if h1["acc"] else None},
         "l2": {"frozen_at": h2["frozen_at"], "minutes": h2["minutes"], "P": l2.P, "F": l2.F, "K": l2.K, "side": l2.side, "block": l2.block, "stride": l2.stride,
@@ -348,7 +392,8 @@ def train_layer3(model: ThreeLayerNetwork, train_loader: DataLoader, loaders: tu
                l2_theta_med=np.array(h2["theta_med"]), l2_usage=np.array(h2["usage"]), l2_active_frac=np.array(h2["active_frac"]),
                l2_latency=np.array(h2["latency"]), l2_distinct=np.array(h2["distinct"]), l2_tie=np.array(h2["tie"]),
                l2_spikes_per_block=np.array(h2["spikes_per_block"]),
-               l2_acc_points=np.array(h2["acc_points"]), l2_accuracy=np.array(h2["acc"]), l2_accuracy_shifted=np.array(h2["acc_shifted"]))
+               l2_acc_points=np.array(h2["acc_points"]), l2_accuracy=np.array(h2["acc"]), l2_accuracy_shifted=np.array(h2["acc_shifted"]),
+               **sta)
     np.savez(run_dir / "run.npz", **npz)
     (run_dir / "run.json").write_text(json.dumps(out, indent=2))
     make_figures(run_dir)
@@ -367,6 +412,9 @@ def main() -> None:
     p.add_argument("--l1-norm", type=float, default=12.0); p.add_argument("--l1-wmax", type=float, default=1.5)
     p.add_argument("--l1-inhibition", type=float, default=200.0, help="within-window inhibition while layer 1 learns")
     p.add_argument("--l1-readout-inhibition", type=float, default=8.0, help="within-window inhibition after stage A (8 = the two-layer study's best)")
+    p.add_argument("--l1-a2-inhibition", type=float, default=None, help="layer 1's within-window inhibition while layer 2 learns (stage A2 and "
+                   "its calibration); default = --l1-readout-inhibition. E.g. 200: layer 2 learns on the sparser one-feature-per-window code, "
+                   "and layer 1 switches to the readout inhibition for stage B")
     p.add_argument("--l1-examples", type=int, default=30000); p.add_argument("--l1-snapshot", type=int, default=20)
     p.add_argument("--l1-no-early-stop", dest="l1_stop_stationary", action="store_false"); p.add_argument("--l1-no-wta", dest="l1_wta", action="store_false")
     # layer 2 (new)
@@ -385,6 +433,7 @@ def main() -> None:
     p.add_argument("--l3-theta-tau", type=float, default=30000.0, help="layer-3 theta decay in examples (0 = off)")
     p.add_argument("--l3-inhibition", type=float, default=200.0); p.add_argument("--l3-drive", type=float, default=0.36)
     p.add_argument("--l3-lr-mult", type=float, default=10.0); p.add_argument("--l3-no-wta", dest="l3_wta", action="store_false")
+    p.add_argument("--l3-skip", action="store_true", help="layer 3 reads layer 1's output as well as layer 2's (a skip connection)")
     # run
     p.add_argument("--epochs", type=int, default=6); p.add_argument("--shift", type=int, default=2); p.add_argument("--seed", type=int, default=0)
     p.add_argument("--steps", type=int, default=350); p.add_argument("--snapshot-interval", type=int, default=200)
@@ -423,18 +472,20 @@ def main() -> None:
     l2 = BlockLayer(l1.side, l1.F, args.l2_block, args.l2_stride, args.l2_features, args.l2_theta_plus, tau_steps(args.l2_theta_tau),
                     w_norm=10.0, w_max=1.0, lr_plus=1e-2 * args.l2_lr_mult, lr_minus=1e-4 * args.l2_lr_mult,
                     inhibition_mV=args.l2_inhibition, wta=bool(args.l2_wta))           # weight scale provisional: set by calibrate_layer2
-    l3 = DiehlAndCookNetwork(l2.N, args.l3_neurons, args.l3_theta_plus, args.l3_inhibition, tau_steps(args.l3_theta_tau), None,
-                             0.1 * l2.N, 1.0, wta=bool(args.l3_wta))                   # weight scale provisional: set by calibrate_layer3
+    n_in3 = l1.N + l2.N if args.l3_skip else l2.N
+    l3 = DiehlAndCookNetwork(n_in3, args.l3_neurons, args.l3_theta_plus, args.l3_inhibition, tau_steps(args.l3_theta_tau), None,
+                             0.1 * n_in3, 1.0, wta=bool(args.l3_wta))                  # weight scale provisional: set by calibrate_layer3
     l3.lr_plus *= args.l3_lr_mult; l3.lr_minus *= args.l3_lr_mult
-    model = ThreeLayerNetwork(l1, l2, l3).to(device)
+    model = ThreeLayerNetwork(l1, l2, l3, skip=bool(args.l3_skip)).to(device)
 
     run_name = (f"3L_l1p{args.l1_patch}s{args.l1_stride}f{args.l1_features}rd{args.l1_readout_inhibition:g}"
-                f"_l2b{args.l2_block}s{args.l2_stride}f{args.l2_features}")
+                + (f"a2inh{args.l1_a2_inhibition:g}" if args.l1_a2_inhibition is not None else "")
+                + f"_l2b{args.l2_block}s{args.l2_stride}f{args.l2_features}")
     if args.l2_readout_inhibition is not None: run_name += f"_l2rd{args.l2_readout_inhibition:g}"
     if args.l2_drive_mult != 1.0: run_name += f"_l2drv{args.l2_drive_mult:g}"
     if args.l2_lr_mult != 1.0: run_name += f"_l2lr{args.l2_lr_mult:g}"
     if args.l2_theta_plus != 0.1: run_name += f"_l2tp{args.l2_theta_plus:g}"
-    run_name += f"_l3n{args.l3_neurons}"
+    run_name += f"_l3n{args.l3_neurons}" + ("skip" if args.l3_skip else "")
     if args.l3_drive != 0.36: run_name += f"_l3drv{args.l3_drive:g}"
     if args.l3_lr_mult != 10.0: run_name += f"_l3lr{args.l3_lr_mult:g}"
     run_name += f"_ep{args.epochs}_seed{args.seed}"
@@ -453,11 +504,14 @@ def main() -> None:
     # ---- stage A: layer 1 (the two-layer study's code), then freeze and switch to the readout inhibition -------------
     model.learn_l1, model.learn_l2, model.learn_l3 = True, False, False
     h1 = train_layer1(model, l1_loader, device, cfg, loaders)              # type: ignore[arg-type]
-    l1.inhibition = float(args.l1_readout_inhibition)
-    print(f"[layer 1] frozen at {h1['frozen_at']} examples; readout inhibition {l1.inhibition:g} mV (was {args.l1_inhibition:g} while learning)")
+    l1.inhibition = float(args.l1_a2_inhibition if args.l1_a2_inhibition is not None else args.l1_readout_inhibition)
+    print(f"[layer 1] frozen at {h1['frozen_at']} examples; inhibition {l1.inhibition:g} mV while layer 2 learns (was {args.l1_inhibition:g} while layer 1 learned)")
     cfg.update(calibrate_layer2(model, l1_loader, device, args.steps, args.l2_drive_mult))
     # ---- stage A2: layer 2, then freeze and (optionally) switch its readout inhibition ------------------------------
     h2 = train_layer2(model, l2_loader, device, cfg, loaders)
+    if l1.inhibition != float(args.l1_readout_inhibition):
+        l1.inhibition = float(args.l1_readout_inhibition)
+        print(f"[layer 1] readout inhibition {l1.inhibition:g} mV from here on (stage B and evaluation)")
     if args.l2_readout_inhibition is not None:
         l2.inhibition = float(args.l2_readout_inhibition)
         print(f"[layer 2] readout inhibition {l2.inhibition:g} mV (was {args.l2_inhibition:g} while learning)")

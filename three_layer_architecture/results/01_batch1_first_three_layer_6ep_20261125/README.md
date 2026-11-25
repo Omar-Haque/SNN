@@ -52,5 +52,45 @@ bash unity/submit_three_layer.sh           # then the six jobs on Unity
 python three_layer_architecture/summarize_three_layer.py --results three_layer_architecture/results
 ```
 
-## Results
-(to be filled in when the runs finish)
+## Results (Unity, 2026-11-25; ~3 h per run)
+
+"Epochs 4–6" = mean of all snapshots in epochs 4–6 (held-out / shifted ±2 px). "Layer 1 / layer 2 alone" = that layer
+labelled and scored as the output at its freeze. Replay columns: the trained layers 1 + 2 simulated in numpy on 120 test
+digits (`layer1_analysis/l1lib.py` + a layer-2 step) — how many layer-2 channels (block × feature) fire per image, and how
+blurred the image's own layer-2 code looks when drawn back to pixels (σ of the Gaussian blur of the digit it matches best).
+
+| run | final | epochs 4–6 | gap | layer 1 alone | layer 2 alone | layer-2 channels / img | layer-2 spikes / img | code blur σ | layer-3 input (spikes/ms) |
+|---|---|---|---|---|---|---|---|---|---|
+| default, seed 0 | 77.1 | 75.7 / 52.2 | 23.5 | 67.2 / 49.3 | 63.2 / 45.1 | ~20 | 189 | 2 px | 0.60 |
+| default, seed 1 | 74.3 | 75.2 / 51.6 | 23.6 | 68.3 / 49.1 | 63.0 / 44.7 | – | – | – | 0.58 |
+| layer-2 readout 8 mV | 80.7 | **80.3** / 53.3 | 27.0 | 67.2 / 49.3 | 63.2 / 45.1 | ~76 | 309 | 2 px | 0.99 |
+| blocks at stride 1 (81 blocks) | 79.2 | 79.4 / **53.9** | 25.5 | 67.2 / 49.3 | 66.9 / 47.1 | ~69 | 618 | 2 px | 1.93 |
+| 5×5 blocks (16 blocks) | 73.5 | 73.4 / 48.7 | 24.7 | 67.2 / 49.3 | 67.4 / 46.9 | ~15 | 125 | 3 px | 0.39 |
+| layer-2 lr ×5 | 77.9 | 77.5 / 53.6 | 23.9 | 67.2 / 49.3 | 65.2 / 44.5 | – | – | – | 0.65 |
+| *two layers, stride 2 + 8 mV (seeds 0 / 1)* | | *85.3 / 56.5 · 87.3 / 57.4* | *~29* | *67.2 · 68.3* | | *343 (layer-1 channels)* | *~1,065* | *1.5 px (layer-1 code)* | *3.3* |
+| *single layer* | | *85.6 / 60.6* | *25.0* | | | | | | |
+
+- **Sanity check passed:** layer 1 alone matches the two-layer runs exactly (67.2 / 49.3 seed 0, 68.3 / 49.1 seed 1), so
+  every difference comes from layers 2 and 3.
+- **The third layer costs 5–12 points** (73–80 % vs 85–87 %), and shifted digits did not improve (48.7–53.9 %, below
+  the two-layer 56.5–57.4); the held-out − shifted gap is unchanged (~24–27).
+- **Layer 3 is starved of channels.** Each layer-2 block reports one of 16 features (200 mV), so layer 3 hears ~20
+  channels per image instead of the two-layer top layer's 343. Accuracy follows the channel count: ~15 → 73.4, ~20 →
+  75.7, ~69 → 79.4, ~76 → 80.3 — the same pattern as the two-layer batches 5–6 (accuracy tracked layer-1 spikes from more
+  channels). The two changes that add channels (8 mV readout, stride 1) are the two best runs.
+- **Layer 2 alone (63–67 %) is no better than layer 1 alone (67 %)**: it compresses 144 input channels into one symbol per
+  block and loses information on the way.
+- **Why the pictures are blurry (F3, F4):**
+  1. the drawing itself: a single digit's *layer-1* code drawn back already looks like the digit blurred by σ 1–1.5 px
+     (each count is drawn as a whole, slightly fuzzy 7×7 template, and neighbouring windows overlap by 5 px); F4 draws
+     through two such layers;
+  2. drawing through two layers adds up: one digit's *layer-2* code drawn back is blurred by σ 2 px (3 px with 5×5
+     blocks). My first reading — that layer-2 features are coarse blobs — was wrong: see F6 below;
+  3. a template is an average over every instance its neuron wins (as in any D&C layer).
+  **Added after the runs (`sta_replay.py`, F6/F7):** the spike-triggered averages — the average pixel patch each layer-2
+  neuron fired for on the 1,000 test digits — are sharp, specific stroke combinations (arcs, corners, bars, loops,
+  junctions), and layer-3 neurons fire for clean digit shapes. The replay reproduces each run's accuracy within 1.5
+  points with the run's own labels. So the blur in F3/F4 is mostly the drawing method; the features are good, and the
+  accuracy gap is the channel count, not the features.
+  The layer-2 templates did not collapse onto one another: they use ~56 % of their inputs (random start 78 %), and
+  features of the same block are unrelated (mean-centred correlation 0.07). They are distinct.

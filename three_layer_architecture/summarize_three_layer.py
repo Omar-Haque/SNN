@@ -5,7 +5,8 @@ S1_accuracy_overlay.png in that folder.
 Per run: group (batch folder), run, variant, seed, the freeze points of layers 1 and 2, each lower layer's own accuracy at its
 freeze (held-out / shifted), layer 3's final accuracy (last 3 snapshots), the mean of the last three epochs' snapshots
 (held-out / shifted; the steadiest number), the held-out - shifted gap, the best snapshot, layer 2's and layer 3's
-calibrated input rates, layer-3 spikes per presentation, minutes.
+calibrated input rates, layer-3 spikes per presentation, with --l3-skip the share of layer 3's weight on layer-2 lines
+(at the end and at the start), minutes.
     python summarize_three_layer.py [--results results]
 """
 import argparse, csv, json
@@ -23,6 +24,8 @@ def label(c):
     if c.get("l2_drive_mult", 1.0) != 1.0: lab += f" drv×{c['l2_drive_mult']:g}"
     if c.get("l2_lr_mult", 1.0) != 1.0: lab += f" lr×{c['l2_lr_mult']:g}"
     if c.get("l2_theta_plus", 0.1) != 0.1: lab += f" θ+{c['l2_theta_plus']:g}"
+    if c.get("l1_a2_inhibition") is not None: lab += f" A2@{c['l1_a2_inhibition']:g}mV"
+    if c.get("l3_skip"): lab += " +skip"
     if c.get("l1_stride", 2) != 2 or c.get("l1_readout_inhibition", 8.0) != 8.0: lab += f" | L1 s{c['l1_stride']} rd{c['l1_readout_inhibition']:g}"
     if c.get("l3_drive", 0.36) != 0.36 or c.get("l3_lr_mult", 10.0) != 10.0: lab += f" | L3 drv{c['l3_drive']:g} lr×{c['l3_lr_mult']:g}"
     return lab
@@ -43,7 +46,9 @@ def main():
                      "last3_epochs": c["last3_epochs_accuracy"], "last3_epochs_shifted": c["last3_epochs_accuracy_shifted"],
                      "gap": c["last3_epochs_accuracy"] - c["last3_epochs_accuracy_shifted"], "max_acc": c["max_accuracy"],
                      "l2_input_per_ms_active_block": c.get("l2_input_rate_per_ms_active_block"), "l3_input_per_ms": c.get("l3_input_rate_per_ms"),
-                     "l3_spikes_per_presentation": c.get("final_l3_spikes_per_presentation"), "minutes": c["minutes"]})
+                     "l3_spikes_per_presentation": c.get("final_l3_spikes_per_presentation"),
+                     "l3_weight_share_l2": c.get("l3_weight_share_l2"), "l3_weight_share_l2_at_start": c.get("l3_weight_share_l2_at_start"),
+                     "minutes": c["minutes"]})
         z = np.load(r / "run.npz"); curves.append((label(c) + f" seed {c['seed']}", z["points"], z["accuracy"], z["accuracy_shifted"]))
     if not rows:
         print("no finished runs under", root); return

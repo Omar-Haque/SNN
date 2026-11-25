@@ -59,20 +59,30 @@ first batch, every `--snapshot-interval` batches (200 = 6,400 images) and at its
 | `three_layer.py` | the network and training; imports layer 1, layer 3, the estimators and stage A from `../new_architecture_testing/snn_multi_layered_unshared/multi_layer_unshared.py` (a change there changes these runs too) |
 | `three_layer_plots.py` | the figures of one run (numpy + matplotlib); `python three_layer.py --replot <run dir>` redraws them |
 | `summarize_three_layer.py` | every finished run under `results/` → `results/summary.csv`, `results/S1_accuracy_overlay.png` |
+| `sta_replay.py` | spike-triggered averages (F6, F7) for runs made before `three_layer.py` saved them (batch 1), in numpy: `python sta_replay.py <run dir> ...` |
 | `../unity/submit_three_layer.sh` | the current Unity batch (and `smoke`, and resubmitting jobs by name) |
 | `results/<batch folder>/` | one folder per batch with a README.md (configuration, questions, results); one subfolder per run |
 
 Each run folder: `run.json` (configuration, calibrations, summary numbers), `run.npz` (curves, every layer's weights and
-thresholds, per-stage diagnostics) and five figures:
+thresholds, per-stage diagnostics, spike-triggered averages) and seven figures:
 - **F1_accuracy** — accuracy across all three stages (teal: layer 1 as the output, orange: layer 2, blue: layer 3; dashed:
   shifted digits), green dashed lines at the two freezes, gray lines at the single-layer and two-layer references.
 - **F2_layer1_templates** — the 16 layer-1 templates at four windows.
 - **F3_layer2_features** — layer-2 neurons drawn in pixel space (each weight × the layer-1 template it reads, at that
-  template's place): what the mid-level features look like. A linear back-projection — it shows what the weights favour,
-  not exactly what makes the neuron fire.
+  template's place). A linear back-projection through overlapping, slightly fuzzy layer-1 templates: it makes the features
+  look much blurrier than they are — use F6 to see what they respond to.
 - **F4_layer3_templates** — the 20 most active layer-3 neurons drawn in pixel space through layers 2 and 1, with labels.
 - **F5_stages** — per stage: unformed layer-1 templates; layer-2 templates still at their initial weights, θ, blocks
   firing, latency, features per active block; layer-3 rows at initial weights, spikes per presentation, θ.
+- **F6_layer2_sta** — the same layer-2 neurons as F3, as the average pixel patch each fired for on the 1,000 test digits
+  (spike-triggered average): what actually drives the neuron. In batch 1: sharp arcs, corners, bars, loops, junctions.
+- **F7_layer3_sta** — the same 20 layer-3 neurons as F4, as the average test digit each fired for (a neuron that fired on
+  only a few digits gives a sharp but unrepresentative average; the spike count is in the title).
+
+Figures can be redrawn without torch: `python three_layer_plots.py <run dir> ...`.
+
+Options beyond the layer settings: `--l3-skip` (layer 3 also reads layer 1's output — a skip connection),
+`--l1-a2-inhibition` (layer 1's inhibition while layer 2 learns; default = its readout inhibition), `--device auto|cpu|mps|cuda`.
 
 ## Running
 ```bash
@@ -93,4 +103,5 @@ figures — runs for that configuration. Logs and run folders go to `results/smo
 ## Batches
 | folder | question | outcome |
 |---|---|---|
-| `results/01_batch1_first_three_layer_6ep_20261125/` | Does a third layer keep the centred-digit accuracy, and what do the first layer-2 choices (readout, overlap, block size, learning rate) do? | pending |
+| `results/01_batch1_first_three_layer_6ep_20261125/` | Does a third layer keep the centred-digit accuracy, and what do the first layer-2 choices (readout, overlap, block size, learning rate) do? | 73–80 % vs two layers' 85–87 %; no shift gain. Layer 3 hears ~20 layer-2 channels per image (two layers: 343) and accuracy follows the channel count (8 mV readout 80.3, stride 1 79.4). Layer-2 features are sharp stroke combinations (F6); the pictures in F3/F4 are blurred by the drawing method. |
+| `results/02_batch2_more_channels_6ep_20261125/` | Layer 2's features are good (F6) but layer 3 hears ~20 channels per image: what gives it more (softer readout, overlap, more features, smaller blocks, skip connection), and does training layer 2 on the sharper layer-1 code help? 19 jobs | pending |
