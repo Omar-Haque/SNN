@@ -62,5 +62,48 @@ python new_architecture_testing/snn_multi_layered_unshared/summarize_multi_layer
     --results new_architecture_testing/snn_multi_layered_unshared/results_2     # summary.csv, S1, S2 in results_2/
 ```
 
-## Results
-(to be filled in when the runs finish)
+## Results (Unity, 2026-11-23; five of the six jobs first died on a faulty node, `gypsum-gpu083`, and were resubmitted)
+
+Accuracy = mean of all snapshots in epoch 6 / in epochs 4–6; "gap" = held-out − shifted (epochs 4–6). Layer-1 columns:
+each run's frozen layer 1 replayed in numpy on 300 test digits at its readout inhibition (spikes per image, distinct
+window × feature channels that fired, code similarity for the same image twice and for a 1-px shift).
+
+| run | seed | last 3 | epoch 6 | epochs 4–6 | shifted 4–6 | gap | best | layer-1 spikes / img | channels / img | same image | 1-px shift | layer-2 spikes / presentation |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| single layer (batch 2) | 0 | 85.9 | 85.9 | 85.6 | 60.6 | 25.0 | 87.7 | – | – | 0.97 (px) | 0.75 (px) | 20.7 |
+| baseline (stride 3, 200 mV) | 0 | 84.2 | 82.7 | 82.1 | 57.4 | 24.7 | 84.7 | 308 | 36.6 | 0.75 | 0.39 | 14.4 |
+| baseline | 1 | 82.4 | 82.0 | 81.2 | 56.1 | 25.1 | 83.2 | 305 | 36.5 | 0.74 | 0.40 | 14.3 |
+| stride 2 (batch 5) | 0 | 84.8 | 84.5 | 84.6 | 59.2 | 25.4 | 86.2 | 655 | 76.7 | 0.74 | 0.40 | 13.8 |
+| stride 2 | 1 | 84.9 | 85.1 | 84.4 | 58.0 | 26.4 | 86.3 | 652 | 76.6 | 0.74 | 0.40 | 13.7 |
+| 8 mV (batch 5) | 0 | 85.6 | 84.9 | 84.2 | 56.9 | 27.3 | 87.2 | 500 | 159.5 | 0.98 | 0.74 | 11.0 |
+| 8 mV | 1 | 83.7 | 84.5 | 84.1 | 55.7 | 28.4 | 85.9 | 496 | 159.9 | 0.98 | 0.74 | 11.0 |
+| **stride 2 + 8 mV** | 0 | 86.8 | **86.3** | 85.3 | 56.5 | 28.9 | 87.3 | 1,069 | 343.2 | 0.98 | 0.74 | 10.3 |
+| **stride 2 + 8 mV** | 1 | 87.3 | **87.5** | **87.3** | 57.4 | 29.9 | 88.9 | 1,064 | 343.7 | 0.98 | 0.74 | 10.3 |
+| 4 mV | 0 | 84.8 | 84.6 | 84.8 | 56.0 | 28.8 | 86.8 | 771 | 240.4 | 0.98 | 0.80 | 9.3 |
+| pool2 + 8 mV | 0 | 81.9 | 81.5 | 81.8 | 56.9 | 24.9 | 84.8 | 500 (before pooling) | 159.5 | 0.98 | 0.74 | 7.1 |
+| pool2, 200 mV (batch 4) | 0 | 77.2 | 78.5 | 78.2 | 52.9 | 25.3 | 80.6 | 308 (before pooling) | 36.6 | 0.75 | 0.39 | 9.4 |
+
+Per epoch (held-out / shifted):
+
+| run | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| single layer | 73.5 / 49.3 | 84.6 / 57.8 | 85.6 / 59.8 | 85.5 / 60.2 | 85.4 / 60.5 | 85.9 / 60.9 |
+| stride 2 + 8 mV, seed 0 | 75.5 / 42.9 | 82.5 / 51.0 | 84.1 / 53.8 | 84.4 / 54.8 | 85.2 / 56.4 | 86.3 / 58.1 |
+| stride 2 + 8 mV, seed 1 | 75.4 / 44.4 | 84.1 / 51.7 | 85.2 / 54.7 | 86.4 / 56.3 | 87.8 / 57.4 | 87.5 / 58.2 |
+
+- **Both batch-5 winners replicate on seed 1**: stride 2 +3.2 points over the seed-1 baseline (seed 0: +2.5), 8 mV +2.9
+  (seed 0: +2.1).
+- **Together they reach the single layer on centred digits.** In epoch 6 both seeds are above it (86.3 and 87.5 vs 85.9),
+  and seed 0 was still climbing; best snapshots 87.3 / 88.9 vs 87.7. The two seeds differ by 1–2 points although their
+  layer 1s are statistically indistinguishable (1,069 vs 1,064 spikes per image, same stability), so the spread comes from
+  layer 2's learning. One single-layer seed at 6 epochs is the reference: more seeds of both are needed before calling it
+  better.
+- **Shifted digits did not follow.** Shifted accuracy stays at 56–59 % in every configuration of batches 4–6 (single layer
+  60.6), so every gain on centred digits widens the gap: ~25 for the 200 mV runs, 27–30 with the soft readout.
+- **Pooling does not buy shift tolerance even on the stable code**: pool2 + 8 mV has the same shifted accuracy as 8 mV
+  without pooling (56.9) and loses 2.4 points held-out. The shift loss sits in what layer 2 learns, not in layer 1's code.
+- **4 mV** adds +0.6 over 8 mV on the same layer 1 — inside the noise; the readout curve flattens (200 / 50 / 17.5 / 8 / 4 mV
+  → 82.1 / 81.7 / 82.0 / 84.2 / 84.8).
+- **Accuracy keeps tracking layer-1 spikes per image**, still rising at the top: ~305 → 81–82 %, ~500 → 84.1–84.2,
+  ~650 → 84.4–84.6, 771 → 84.8, ~1,065 → 85.3–87.3 (epochs 4–6). Layer 2 itself fires less as its input grows (14 → 10
+  spikes per presentation).
