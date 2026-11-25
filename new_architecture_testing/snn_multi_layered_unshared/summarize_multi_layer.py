@@ -28,6 +28,7 @@ def label(cfg):
     lab += f" lr{cfg['l2_lr_mult']:g}" if cfg.get("l2_lr_mult", 1.0) != 1.0 else ""
     lab += " wta" if cfg.get("l1_wta") or cfg.get("l2_wta") else ""
     lab += f" ep{cfg['num_epochs']}" if cfg.get("num_epochs", 2) != 2 else ""
+    lab += " FMNIST" if cfg.get("dataset") == "fmnist" else ""
     return lab
 
 def main():

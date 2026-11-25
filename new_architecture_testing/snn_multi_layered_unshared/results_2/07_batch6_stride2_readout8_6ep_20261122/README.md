@@ -56,8 +56,7 @@ Stride-2 runs took ~2 h in batch 5 like the others; every job has a 5-h limit.
 
 ## Run and summarise
 ```bash
-bash unity/submit_multi_layer.sh smoke     # optional: one short job (stride 2 + 8 mV) on tiny settings -> results/smoke_tests/
-bash unity/submit_multi_layer.sh           # the six jobs
+git show ffdd549:unity/submit_multi_layer.sh   # the script now holds batch 7; this is batch 6's version
 python new_architecture_testing/snn_multi_layered_unshared/summarize_multi_layer.py \
     --results new_architecture_testing/snn_multi_layered_unshared/results_2     # summary.csv, S1, S2 in results_2/
 ```

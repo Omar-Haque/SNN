@@ -29,6 +29,7 @@ LAYER 2  the test4 D&C layer on the 1,024 (or pooled 256) lines, theta_plus 0.5,
          (held-out 1k test images, plus the same images shifted by up to +-2 px).
 USAGE  python multi_layer_unshared.py --seed 0          python multi_layer_unshared.py --pool2       python multi_layer_unshared.py --no-l1
        python multi_layer_unshared.py --smoke           python multi_layer_unshared.py --replot results/<run>
+       python multi_layer_unshared.py --dataset fmnist  (Fashion-MNIST instead of MNIST)
 """
 import argparse
 import json
@@ -539,12 +540,14 @@ def cosine_to_init(W: torch.Tensor, W_init: torch.Tensor) -> torch.Tensor:
     return ((a * b).sum(1) / (a.norm(dim=1) * b.norm(dim=1) + 1e-12)).cpu()
 
 
-def shifted_test_set(n: int, shift: int, seed: int = 1234) -> TensorDataset:
-    """The first n test images, each translated by a fixed random (dx, dy) in [-shift, shift]^2 (zero fill)."""
+def shifted_test_set(n: int, shift: int, seed: int = 1234, dataset=None) -> TensorDataset:
+    """The first n test images, each translated by a fixed random (dx, dy) in [-shift, shift]^2 (zero fill).
+    dataset: the test set to shift (default: MNIST's; main() passes Fashion-MNIST's with --dataset fmnist)."""
+    ds = test_dataset if dataset is None else dataset
     # fixed seed: every snapshot of every run is evaluated on the same 1,000 shifted images
     g = np.random.default_rng(seed)
-    imgs = torch.stack([test_dataset[i][0] for i in range(n)])             # (n, 1, 28, 28)
-    labels = torch.tensor([int(test_dataset[i][1]) for i in range(n)])
+    imgs = torch.stack([ds[i][0] for i in range(n)])             # (n, 1, 28, 28)
+    labels = torch.tensor([int(ds[i][1]) for i in range(n)])
     out = torch.zeros_like(imgs)
     for i in range(n):
         # For dy > 0 the digit moves down: destination rows dy..27 receive source rows 0..27-dy (dx likewise for columns), and the
@@ -572,6 +575,19 @@ class Layer1Readout(nn.Module):
 
     def forward(self, input_spikes: torch.Tensor, learning: bool = False) -> torch.Tensor:
         return self.l1(input_spikes, learning=False)   # never learns: templates and thetas are untouched by scoring
+
+
+def load_datasets(name: str):
+    """(train, test) for --dataset. "mnist": the module's MNIST (loaded at import). "fmnist": Fashion-MNIST -- the same format
+    (28x28 grey images in [0, 1], 10 classes, 60,000 / 10,000), read from (downloaded to) <repo>/data/FashionMNIST.
+    Classes: 0 T-shirt/top, 1 trouser, 2 pullover, 3 dress, 4 coat, 5 sandal, 6 shirt, 7 sneaker, 8 bag, 9 ankle boot."""
+    if name == "mnist":
+        return train_dataset, test_dataset
+    if name == "fmnist":
+        tf = transforms.ToTensor()
+        return (datasets.FashionMNIST(root=str(DATA_ROOT), train=True, download=True, transform=tf),
+                datasets.FashionMNIST(root=str(DATA_ROOT), train=False, download=True, transform=tf))
+    raise ValueError(f"unknown dataset {name!r}")
 
 
 def layer1_accuracy(l1: FeatureLayer, readout: tuple, device: torch.device, num_steps: int) -> tuple[float, float, int]:
@@ -866,6 +882,8 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=2); p.add_argument("--shift", type=int, default=2, help="max |dx|,|dy| of the shifted test set (0 = none)")
     p.add_argument("--seed", type=int, default=0); p.add_argument("--steps", type=int, default=350); p.add_argument("--snapshot-interval", type=int, default=100)
     p.add_argument("--tag", default=""); p.add_argument("--smoke", action="store_true"); p.add_argument("--replot", default=None, metavar="RUN_DIR")
+    p.add_argument("--dataset", choices=["mnist", "fmnist"], default="mnist", help="mnist, or fmnist = Fashion-MNIST (same format; "
+                   "downloaded to <repo>/data on first use)")
     p.add_argument("--results-dir", default="results", help="folder that receives the run folder: relative to this script's folder "
                    "(e.g. results_2, results/smoke_tests) or absolute")
     args = p.parse_args()
@@ -881,12 +899,13 @@ def main() -> None:
     else: device = torch.device("cpu"); print("Using CPU.")
 
     # --smoke: tiny settings to check the code path in a few minutes (640 training images, 25-ms presentations)
+    train_ds, test_ds = load_datasets(args.dataset)
     if args.smoke:
-        train_subset = Subset(train_dataset, range(0, 32 * 20)); assign_subset = Subset(train_dataset, range(0, 128)); eval_subset = Subset(test_dataset, range(0, 64))
+        train_subset = Subset(train_ds, range(0, 32 * 20)); assign_subset = Subset(train_ds, range(0, 128)); eval_subset = Subset(test_ds, range(0, 64))
         assign_bs = eval_bs = 128; args.epochs, args.steps, args.snapshot_interval = 1, 25, 5
         args.l1_examples, args.l1_snapshot = 32 * 14, 2; n_shift = 64
     else:
-        train_subset = train_dataset; assign_subset = Subset(train_dataset, range(0, 2000)); eval_subset = Subset(test_dataset, range(0, 1000))
+        train_subset = train_ds; assign_subset = Subset(train_ds, range(0, 2000)); eval_subset = Subset(test_ds, range(0, 1000))
         assign_bs = eval_bs = 512; n_shift = 1000
     # Loaders. train_loader feeds stage B; l1_loader feeds stage A and the calibration, shuffled with a different seed (seed +
     # 1000) so the two stages see the images in different orders. assign/eval: train 0-1999 and test 0-999 in a fixed order
@@ -895,7 +914,7 @@ def main() -> None:
     train_loader = DataLoader(train_subset, batch_size=32, shuffle=True, generator=gen)
     l1_loader = DataLoader(train_subset, batch_size=32, shuffle=True, generator=torch.Generator().manual_seed(args.seed + 1000))
     assign_loader = DataLoader(assign_subset, batch_size=assign_bs, shuffle=False); eval_loader = DataLoader(eval_subset, batch_size=eval_bs, shuffle=False)
-    shifted_loader = DataLoader(shifted_test_set(n_shift, args.shift), batch_size=eval_bs, shuffle=False) if args.shift > 0 else None
+    shifted_loader = DataLoader(shifted_test_set(n_shift, args.shift, dataset=test_ds), batch_size=eval_bs, shuffle=False) if args.shift > 0 else None
 
     # ---- build ----
     # --no-l1: the single-layer reference, i.e. the base network (784 inputs, row sum 78.4, w_max 1.0) with this script's
@@ -929,6 +948,7 @@ def main() -> None:
     if args.l2_wta: run_name += "_l2wta"
     if args.l2_drive != 1.2 and not args.no_l1: run_name += f"_drv{args.l2_drive:g}"
     if args.l2_lr_mult != 1.0: run_name += f"_lr{args.l2_lr_mult:g}"
+    if args.dataset != "mnist": run_name += f"_{args.dataset}"
     if args.tag: run_name += f"_{args.tag}"
     if args.smoke: run_name += "_SMOKE"
     run_name += "_" + time.strftime("%Y%m%d-%H%M%S")
@@ -943,6 +963,7 @@ def main() -> None:
            "l1_theta_plus": args.l1_theta_plus, "l1_theta_tau": args.l1_theta_tau, "l1_theta_shared": bool(args.l1_theta_shared), "l1_norm": args.l1_norm, "l1_wmax": args.l1_wmax,
            "l1_inhibition": args.l1_inhibition, "l1_stdp_reduce": args.l1_stdp_reduce, "l1_examples": args.l1_examples, "l1_snapshot": args.l1_snapshot,
            "l1_stop_stationary": bool(args.l1_stop_stationary), "l2_inputs": n_in, "l2_norm": l2_norm, "l2_wmax": l2_wmax, "shift": args.shift}
+    cfg["dataset"] = args.dataset
     print("config:", json.dumps(cfg))
     # stage A (skipped for --no-l1)
     l1_hist = train_layer1(model, l1_loader, device, cfg, (assign_loader, eval_loader, shifted_loader)) if l1 is not None else None
