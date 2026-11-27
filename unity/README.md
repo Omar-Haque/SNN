@@ -56,7 +56,8 @@ https://download.pytorch.org/whl/cu126` inside the `snn` env, or restrict jobs t
 Bad nodes: a job that dies at its very first CUDA call (e.g. `CUDA error: an illegal memory access was encountered` in
 `spikegen.rate`) while the same configuration runs elsewhere is a node problem, not the code. The log's `node` line
 names the node (`node gypsum-gpuXXX | gpu: ...`); add it to the `--exclude=` line in `run.sbatch` and resubmit the failed
-jobs by name. `gypsum-gpu083` is excluded since 2026-11-22 (all five batch-6 jobs sent there failed this way).
+jobs by name. `gypsum-gpu083` is excluded since 2026-11-22 (all five batch-6 jobs sent there failed this way). `gypsum-gpu018` is excluded since 2026-11-26: two jobs there ran 2.3–3× slower than the
+same-sized jobs elsewhere, and one hit its time limit.
 A job that crashes leaves at most an empty run folder, which git does not see — so a failed job shows up as
 "nothing to commit"; check `sacct --starttime today -o JobName,State,NodeList,Elapsed` or the logs.
 

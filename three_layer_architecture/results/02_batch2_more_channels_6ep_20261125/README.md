@@ -74,10 +74,53 @@ Notes:
 
 ## Run and summarise
 ```bash
-bash unity/submit_three_layer.sh smoke     # first, on your own computer: all 19 configurations on tiny settings
-bash unity/submit_three_layer.sh           # the 19 jobs on Unity
+git show 3b1887b:unity/submit_three_layer.sh   # the script now holds batch 3; this is this batch's version
 python three_layer_architecture/summarize_three_layer.py --results three_layer_architecture/results
 ```
 
-## Results
-(to be filled in when the runs finish)
+## Results (Unity, 2026-11-25/26)
+
+Mean of the snapshots of epochs 4–6 (held-out / shifted ±2 px); "layer-3 input" = layer 2's calibrated output rate (spikes
+per ms per presentation, both pathways with `--l3-skip`); "dead" = layer-2 neurons that never fired on the 1,000 test digits.
+`tl2_b3s1_f32_rd8` hit the 10-h limit in epoch 6 (313,632 of 360,000 images; its numbers come from the log). It and
+`tl2_a2inh200_rd8` (6.6 h) both ran on `gypsum-gpu018`; every other job took 2.7–2.9 h, so that node was slow, not the code.
+
+| job | epochs 4–6 | gap | best | layer 2 alone | layer-3 input /ms | layer-3 lines | dead layer 2 |
+|---|---|---|---|---|---|---|---|
+| *references:* single layer · two layers s0 / s1 | *85.6 / 60.6 · 85.3 / 56.5 · 87.3 / 57.4* | | | | | | |
+| `tl2_control` (= batch-1 default) | 75.7 / 52.2 | 23.4 | 78.3 | 63.2 | 0.60 | 400 | 46 / 400 |
+| **A** `tl2_b3s1_rd8` / `_s1` | 82.7 / 54.0 · 82.1 / 52.7 | 28.7 · 29.4 | 84.7 · 84.9 | 66.9 · 64.6 | 3.15 · 3.12 | 1,296 | 65 · 64 |
+| `tl2_rd4` | 81.9 / 55.5 | 26.3 | 84.4 | 63.2 | 1.45 | 400 | 9 |
+| `tl2_b3s1_rd4` | 83.2 / 54.6 | 28.6 | 85.2 | 66.9 | 4.62 | 1,296 | 18 |
+| **B** `tl2_f32` | 76.5 / 52.3 | 24.2 | 79.1 | 66.7 | 0.64 | 800 | 201 / 800 |
+| `tl2_f64` | 77.1 / 52.0 | 25.0 | 79.9 | 65.9 | 0.65 | 1,600 | 739 / 1,600 |
+| `tl2_f32_tp0.3` | 73.7 / 48.1 | 25.5 | 77.7 | 69.5 | 0.46 | 800 | 48 / 800 |
+| `tl2_f32_rd8` | 79.9 / 53.7 | 26.3 | 82.2 | 66.7 | 1.06 | 800 | 143 / 800 |
+| **C** `tl2_b2s1` | 81.0 / 55.4 | 25.6 | 83.6 | 66.0 | 2.17 | 1,600 | 213 / 1,600 |
+| `tl2_b2s1_rd8` | 83.0 / 55.6 | 27.4 | 85.6 | 66.0 | 3.73 | 1,600 | 142 / 1,600 |
+| **D** `tl2_skip` / `_s1` | **85.1 / 56.1 · 84.7 / 56.0** | 29.1 · 28.6 | 87.1 · 87.3 | 63.2 · 63.0 | 3.96 · 3.85 | 2,336 | 46 · 51 |
+| `tl2_skip_rd8` | 84.0 / 54.9 | 29.2 | 85.9 | 63.2 | 4.35 | 2,336 | 36 |
+| `tl2_skip_b3s1_rd8` | 83.8 / 54.7 | 29.1 | 85.9 | 66.9 | 6.51 | 3,232 | 65 |
+| **E** `tl2_a2inh200` | 77.4 / 54.4 | 23.0 | 79.7 | 64.5 | 0.92 | 400 | 19 |
+| `tl2_a2inh200_rd8` | **84.2 / 56.1** | 28.1 | 85.8 | 64.9 | 1.65 | 400 | 13 |
+| **F** `tl2_b3s1_f32_rd8` (timed out) | 81.8 / 52.4 | 29.5 | 84.9 | – | 3.39 | 2,592 | – |
+| `tl2_b2s1_f32_rd8` | 83.3 / 55.8 | 27.5 | 85.7 | 67.4 | 4.04 | 3,200 | 555 / 3,200 |
+
+- **The control reproduces batch 1 exactly** (75.7 / 52.2, same snapshots), so the new code changed nothing it shouldn't.
+- **More channels helps, up to ~83 %.** Overlap plus a soft readout (A, C) takes the network from 75.7 to 82–83 %, and the
+  layer-3 input rate tracks it — but past ~3 spikes/ms it flattens (3.1 → 82.1–82.7, 3.7 → 83.0, 4.0 → 83.3, 4.6 → 83.2).
+- **What layer 2 learns from matters most.** Layer 2 trained on layer 1's one-feature-per-window code (200 mV) and read out
+  at 8 mV reaches **84.2 %** with only 400 layer-2 neurons and 1.65 spikes/ms into layer 3 — above every A/C/F run, which
+  need 2–3× the channels. Read out at 200 mV it gives 77.4 (control 75.7). Its features were learned on a sparser, sharper
+  input, so each layer-2 spike carries more.
+- **More features per block does not help.** The extra features mostly never fire (201 of 800, 739 of 1,600 dead), and a
+  block still reports one winner at 200 mV, so layer 3 gets no more input (0.64–0.65 spikes/ms). A stronger conscience keeps
+  them alive (48 dead) but lowers layer 2's output further (0.46) and accuracy with it (73.7) — though it gives the best
+  layer-2-alone score (69.5).
+- **The skip connection gets the two-layer accuracy, not more — and layer 3 largely ignores layer 2.** 85.1 / 84.7 % vs the
+  two-layer 85.3 / 87.3 on the same seeds. The share of layer 3's weight on layer-2 lines ends at 13 % (it started at 17 %);
+  with the 8 mV layer 2 it ends at 21 % (start 17 %), with the stride-1 layer 2 at 46 % (start 40 %). Layer 3 moves weight
+  toward layer 1, not toward the parts.
+- **No shift gain anywhere:** shifted accuracy 48–56 % (two layers 56.5–57.4, single layer 60.6).
+- **Best three-layer runs:** 85.1 / 84.7 % with the skip connection (≈ two layers), 84.2 % without it (layer 2 trained at
+  200 mV, read at 8 mV; one seed). Still under the two-layer mean (86.3) and the single layer (85.6) on centred digits.

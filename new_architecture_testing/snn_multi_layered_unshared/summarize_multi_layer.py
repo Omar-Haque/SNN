@@ -29,6 +29,7 @@ def label(cfg):
     lab += " wta" if cfg.get("l1_wta") or cfg.get("l2_wta") else ""
     lab += f" ep{cfg['num_epochs']}" if cfg.get("num_epochs", 2) != 2 else ""
     lab += " FMNIST" if cfg.get("dataset") == "fmnist" else ""
+    lab += " inorm" if cfg.get("input_norm") else ""
     return lab
 
 def main():

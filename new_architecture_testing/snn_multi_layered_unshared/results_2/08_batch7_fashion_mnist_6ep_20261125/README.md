@@ -42,14 +42,51 @@ Nothing is retuned, and the extra ink reaches the two networks differently:
 
 ## Run and summarise
 ```bash
-bash unity/submit_multi_layer.sh smoke     # first, on your own computer: the four configurations on tiny settings
-                                           # (downloads Fashion-MNIST to data/FashionMNIST the first time)
-# on Unity, from the repo root, with the environment active (the script downloads Fashion-MNIST on the login node first):
-module load conda/latest && conda activate snn
-bash unity/submit_multi_layer.sh           # the four jobs
+git show edb3cd3:unity/submit_multi_layer.sh   # the script now holds batch 8; this is batch 7's version
 python new_architecture_testing/snn_multi_layered_unshared/summarize_multi_layer.py \
     --results new_architecture_testing/snn_multi_layered_unshared/results_2       # summary.csv, S1, S2 in results_2/
 ```
 
-## Results
-(to be filled in when the runs finish)
+## Results (Unity, 2026-11-25)
+
+Mean of the snapshots of epochs 4–6, held-out / shifted ±2 px.
+
+| network | seed | Fashion-MNIST | gap | best | MNIST (same seed) |
+|---|---|---|---|---|---|
+| single layer | 0 / 1 | **69.4 / 53.2 · 69.6 / 53.4** | 16.3 · 16.2 | 72.9 · 71.8 | 85.6 / 60.6 (seed 0) |
+| two layers, stride 2 + 8 mV | 0 / 1 | 63.5 / 45.8 · 64.2 / 45.9 | 17.7 · 18.3 | 65.5 · 66.1 | 85.3 / 56.5 · 87.3 / 57.4 |
+
+Layer 1 alone: 57.5 / 57.1 % (MNIST 67.2 / 68.3). Layer-1 output into layer 2: 4.97 / 5.02 spikes/ms (MNIST 3.3).
+Both networks are flat from epoch 2–3 on.
+
+Per-class recall (last 6 snapshots) and labels:
+
+| class | ink | single layer: recall · neurons | two layers: recall · neurons | layer-1 spikes per image |
+|---|---|---|---|---|
+| T-shirt | 0.34 | 75 / 69 · 40 / 38 | 76 / 75 · 43 / 40 | 2,046 |
+| trouser | 0.22 | 91 / 92 · 23 / 20 | 84 / 88 · 12 / 15 | 1,225 |
+| pullover | 0.39 | 50 / 53 · 58 / 46 | 47 / 48 · 54 / 57 | 2,507 |
+| dress | 0.26 | 69 / 75 · 29 / 27 | 72 / 70 · 28 / 26 | 1,579 |
+| coat | 0.39 | 57 / 55 · 44 / 48 | 54 / 55 · 72 / 58 | 2,597 |
+| **sandal** | **0.12** | **71 / 68 · 13 / 16** | **22 / 22 · 2 / 3** | **503** |
+| shirt | 0.34 | 31 / 32 · 29 / 36 | 27 / 31 · 42 / 56 | 2,072 |
+| sneaker | 0.16 | 81 / 82 · 16 / 16 | 76 / 77 · 7 / 9 | 912 |
+| bag | 0.37 | 84 / 87 · 46 / 43 | 81 / 82 · 48 / 41 | 2,223 |
+| boot | 0.29 | 91 / 86 · 41 / 41 | 91 / 93 · 34 / 34 | 1,670 |
+
+("ink" = mean pixel intensity, "neurons" = layer-2 / output neurons carrying that label, seed 0 / seed 1; layer-1 spikes from
+the seed-0 layer 1 replayed in numpy at 8 mV on 400 test images — 1,782 on average, 96 of 121 windows firing.)
+
+- **The two-layer network loses 6 points to the single layer on Fashion-MNIST** (63.5 / 64.2 vs 69.4 / 69.6), where on
+  MNIST they were level.
+- **Most of the gap is one class: sandals.** Recall 22 % vs ~70 %; most sandals are labelled T-shirt (267 of the
+  6-snapshot total in seed 0). Only 2–3 of the 400 output neurons carry the sandal label (single layer 13–16); sneakers get
+  7–9 (single layer 16). The other classes are within a few points of the single layer.
+- **Why: light images barely reach layer 2.** Sandals carry the least ink (0.12; average 0.29). Layer 1's fixed threshold
+  turns that into 503 layer-1 spikes per image (average 1,782, coats 2,597; only 62 of 121 windows fire), a 3.5× deficit
+  against the average where the ink deficit is 2.3×. Layer 2's weight scale is calibrated to the average image, so on a sandal
+  its neurons get a fraction of the usual drive and few sandal-specific prototypes form. MNIST digits all carry similar ink
+  (the issue never showed). The single layer sees the 2.3× pixel deficit directly and still forms 13–16 sandal neurons.
+- **Shifts hurt less on Fashion-MNIST** (gap 16–18 vs 25–30): the objects are large and fill the frame.
+- Likely fixes to test: normalise each image's total input (contrast normalisation before the Poisson spikes), or
+  normalise layer 2's input by layer 1's total activity per image (divisive normalisation).

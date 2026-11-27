@@ -29,7 +29,7 @@ LAYER 2  the test4 D&C layer on the 1,024 (or pooled 256) lines, theta_plus 0.5,
          (held-out 1k test images, plus the same images shifted by up to +-2 px).
 USAGE  python multi_layer_unshared.py --seed 0          python multi_layer_unshared.py --pool2       python multi_layer_unshared.py --no-l1
        python multi_layer_unshared.py --smoke           python multi_layer_unshared.py --replot results/<run>
-       python multi_layer_unshared.py --dataset fmnist  (Fashion-MNIST instead of MNIST)
+       python multi_layer_unshared.py --dataset fmnist  (Fashion-MNIST instead of MNIST)   --input-norm  (equal mean intensity per image)
 """
 import argparse
 import json
@@ -577,17 +577,25 @@ class Layer1Readout(nn.Module):
         return self.l1(input_spikes, learning=False)   # never learns: templates and thetas are untouched by scoring
 
 
-def load_datasets(name: str):
+def load_datasets(name: str, input_norm: bool = False):
     """(train, test) for --dataset. "mnist": the module's MNIST (loaded at import). "fmnist": Fashion-MNIST -- the same format
     (28x28 grey images in [0, 1], 10 classes, 60,000 / 10,000), read from (downloaded to) <repo>/data/FashionMNIST.
-    Classes: 0 T-shirt/top, 1 trouser, 2 pullover, 3 dress, 4 coat, 5 sandal, 6 shirt, 7 sneaker, 8 bag, 9 ankle boot."""
-    if name == "mnist":
+    Classes: 0 T-shirt/top, 1 trouser, 2 pullover, 3 dress, 4 coat, 5 sandal, 6 shirt, 7 sneaker, 8 bag, 9 ankle boot.
+    input_norm (--input-norm): every image is scaled so its mean intensity equals the training set's (MNIST 0.131, Fashion-MNIST
+    0.286), so light and heavy images send the same number of Poisson pixel spikes on average; pixels are capped at 10 (spike
+    probability 0.1 x 10 = 1 per ms). Applied in the dataset's transform, so training, calibration, scoring and the shifted
+    test set (built from the test set's items) all see the normalised images."""
+    if name not in ("mnist", "fmnist"):
+        raise ValueError(f"unknown dataset {name!r}")
+    if name == "mnist" and not input_norm:
         return train_dataset, test_dataset
-    if name == "fmnist":
-        tf = transforms.ToTensor()
-        return (datasets.FashionMNIST(root=str(DATA_ROOT), train=True, download=True, transform=tf),
-                datasets.FashionMNIST(root=str(DATA_ROOT), train=False, download=True, transform=tf))
-    raise ValueError(f"unknown dataset {name!r}")
+    cls = datasets.MNIST if name == "mnist" else datasets.FashionMNIST
+    tf = transforms.ToTensor()
+    if input_norm:
+        target = float(cls(root=str(DATA_ROOT), train=True, download=True).data.float().mean() / 255.0)   # the training set's mean intensity
+        tf = transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: (x * (target / x.mean().clamp(min=1e-6))).clamp(max=10.0))])
+    return (cls(root=str(DATA_ROOT), train=True, download=True, transform=tf),
+            cls(root=str(DATA_ROOT), train=False, download=True, transform=tf))
 
 
 def layer1_accuracy(l1: FeatureLayer, readout: tuple, device: torch.device, num_steps: int) -> tuple[float, float, int]:
@@ -884,6 +892,8 @@ def main() -> None:
     p.add_argument("--tag", default=""); p.add_argument("--smoke", action="store_true"); p.add_argument("--replot", default=None, metavar="RUN_DIR")
     p.add_argument("--dataset", choices=["mnist", "fmnist"], default="mnist", help="mnist, or fmnist = Fashion-MNIST (same format; "
                    "downloaded to <repo>/data on first use)")
+    p.add_argument("--input-norm", action="store_true", help="scale every image to the training set's mean intensity (equal total "
+                   "pixel input for light and heavy images)")
     p.add_argument("--results-dir", default="results", help="folder that receives the run folder: relative to this script's folder "
                    "(e.g. results_2, results/smoke_tests) or absolute")
     args = p.parse_args()
@@ -899,7 +909,7 @@ def main() -> None:
     else: device = torch.device("cpu"); print("Using CPU.")
 
     # --smoke: tiny settings to check the code path in a few minutes (640 training images, 25-ms presentations)
-    train_ds, test_ds = load_datasets(args.dataset)
+    train_ds, test_ds = load_datasets(args.dataset, args.input_norm)
     if args.smoke:
         train_subset = Subset(train_ds, range(0, 32 * 20)); assign_subset = Subset(train_ds, range(0, 128)); eval_subset = Subset(test_ds, range(0, 64))
         assign_bs = eval_bs = 128; args.epochs, args.steps, args.snapshot_interval = 1, 25, 5
@@ -949,6 +959,7 @@ def main() -> None:
     if args.l2_drive != 1.2 and not args.no_l1: run_name += f"_drv{args.l2_drive:g}"
     if args.l2_lr_mult != 1.0: run_name += f"_lr{args.l2_lr_mult:g}"
     if args.dataset != "mnist": run_name += f"_{args.dataset}"
+    if args.input_norm: run_name += "_inorm"
     if args.tag: run_name += f"_{args.tag}"
     if args.smoke: run_name += "_SMOKE"
     run_name += "_" + time.strftime("%Y%m%d-%H%M%S")
@@ -963,7 +974,7 @@ def main() -> None:
            "l1_theta_plus": args.l1_theta_plus, "l1_theta_tau": args.l1_theta_tau, "l1_theta_shared": bool(args.l1_theta_shared), "l1_norm": args.l1_norm, "l1_wmax": args.l1_wmax,
            "l1_inhibition": args.l1_inhibition, "l1_stdp_reduce": args.l1_stdp_reduce, "l1_examples": args.l1_examples, "l1_snapshot": args.l1_snapshot,
            "l1_stop_stationary": bool(args.l1_stop_stationary), "l2_inputs": n_in, "l2_norm": l2_norm, "l2_wmax": l2_wmax, "shift": args.shift}
-    cfg["dataset"] = args.dataset
+    cfg["dataset"] = args.dataset; cfg["input_norm"] = bool(args.input_norm)
     print("config:", json.dumps(cfg))
     # stage A (skipped for --no-l1)
     l1_hist = train_layer1(model, l1_loader, device, cfg, (assign_loader, eval_loader, shifted_loader)) if l1 is not None else None

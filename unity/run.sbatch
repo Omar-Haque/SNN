@@ -10,7 +10,7 @@
 #SBATCH -t 04:00:00
 #SBATCH -o unity/logs/%x-%j.out
 #SBATCH --mail-type=END,FAIL
-#SBATCH --exclude=gypsum-gpu083 # 2026-11-22: all 5 jobs placed there died at their first CUDA kernel ("illegal memory access")
+#SBATCH --exclude=gypsum-gpu083,gypsum-gpu018 # gpu083 (2026-11-22): 5 jobs died at their first CUDA kernel ("illegal memory access"); gpu018 (2026-11-25): 2 jobs ran 2.3-3x slower than elsewhere
 set -euo pipefail
 module purge
 module load conda/latest
