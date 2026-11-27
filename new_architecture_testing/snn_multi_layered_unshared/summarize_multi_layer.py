@@ -27,6 +27,8 @@ def label(cfg):
     lab += f" drv{cfg['l2_drive_arg']:g}" if cfg.get("l2_drive_arg", 1.2) != 1.2 and not cfg.get("no_l1") else ""
     lab += f" lr{cfg['l2_lr_mult']:g}" if cfg.get("l2_lr_mult", 1.0) != 1.0 else ""
     lab += " wta" if cfg.get("l1_wta") or cfg.get("l2_wta") else ""
+    lab += f" inh{cfg['inhibition_arg']:g}" if cfg.get("inhibition_arg", 200.0) != 200.0 else ""
+    lab += f" k{cfg['l2_k']}" if cfg.get("l2_k") else ""
     lab += f" ep{cfg['num_epochs']}" if cfg.get("num_epochs", 2) != 2 else ""
     lab += " FMNIST" if cfg.get("dataset") == "fmnist" else ""
     lab += " inorm" if cfg.get("input_norm") else ""
@@ -47,6 +49,10 @@ def main():
                      "t78": spike_time_from_curve(pts, acc, 78.0), "max_acc": float(acc.max()), "spikes_per_presentation": spp,
                      "unmoved_rows_end": int(d["reservoir_init"][-1]) if "reservoir_init" in d else None,
                      "cos_init_median_end": float(np.median(d["cos_init_snap"][-1])) if "cos_init_snap" in d else None, "minutes": cfg.get("minutes", float("nan")),
+                     # last 3 epochs (the comparison metric in the batch READMEs); test-digit statistics of runs from results_for_cnn_replication on
+                     "last3_epochs": float(np.mean(acc[pts > (cfg["num_epochs"] - 3) * 60000])) if (pts > (cfg["num_epochs"] - 3) * 60000).any() else None,
+                     "last3_epochs_shifted": float(np.nanmean(sh[pts > (cfg["num_epochs"] - 3) * 60000])) if (pts > (cfg["num_epochs"] - 3) * 60000).any() else None,
+                     "test_distinct_per_image": cfg.get("test_distinct_per_image"), "class_purity_median": cfg.get("class_purity_median"),
                      "_pts": pts, "_acc": acc, "_sh": sh})
     if not rows: print("no finished runs"); return
     rows.sort(key=lambda r: (r["variant"], r["seed"]))

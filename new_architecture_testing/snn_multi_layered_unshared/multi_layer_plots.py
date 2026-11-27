@@ -1,5 +1,5 @@
 """
-multi_layer_plots.py (copy of test2_plots.py: F1-F7 for layer 2, plus F13-F15 for the two-layer network) -- figures for a single hypo_1 run, and shared helpers used by summarize_hypo_1.py.
+multi_layer_plots.py (copy of test2_plots.py: F1-F7 for layer 2, plus F13-F15 for the two-layer network and F16, the layer-2 spike-triggered averages) -- figures for a single hypo_1 run, and shared helpers used by summarize_hypo_1.py.
 
 Pure numpy + matplotlib (no torch), so figures can be regenerated from a finished run with
     python hypo_1.py --replot results/<run_dir>
@@ -425,5 +425,36 @@ def make_run_figures(run_dir):
                 ax.imshow(imgs[i], cmap='gray'); ax.set_title(f"n{order[i]} → {lab[order[i]]}", fontsize=8)
         fig.suptitle('Layer-2 templates projected to image space (20 most active neurons; title = neuron id → assigned digit)', fontsize=9)
         _footer(fig, cfg); fig.tight_layout(rect=(0, 0.03, 1, 0.93)); fig.subplots_adjust(hspace=0.35); fig.savefig(run_dir / 'F13_layer2_templates.png', dpi=150); plt.close(fig)
+
+    # ---- F16 layer-2 spike-triggered averages (results_for_cnn_replication) ---------------------------------------
+    # The mean input image each layer-2 neuron fired for on the 1,000 test digits (layer2_test_stats in
+    # multi_layer_unshared.py). Whole-digit prototypes look like digits; part-detectors show a stroke, loop or corner.
+    # Neurons are grouped by assigned digit, most active first; black = never fired. Class purity = share of a neuron's
+    # spikes that come from its top digit (~1 for a one-digit prototype, lower for a part several digits share).
+    if 'sta2' in d and 'sta2_count' in d:
+        sta = d['sta2'].astype(np.float32); cnt = d['sta2_count'].astype(np.float32); n_ = sta.shape[0]
+        lab = d['assignments_snap'][-1] if len(d.get('assignments_snap', [])) else np.full(n_, -1)
+        key = np.where(lab < 0, 10, lab)
+        order = np.lexsort((-cnt, key))
+        cols = 20; rows = int(np.ceil(n_ / cols))
+        fig, axes = plt.subplots(rows, cols, figsize=(cols * 0.72, rows * 0.8 + 0.9))
+        for i, ax in enumerate(np.atleast_1d(axes).ravel()):
+            ax.axis('off')
+            if i >= n_: continue
+            j = order[i]
+            img = sta[j].reshape(28, 28) if cnt[j] > 0 else np.zeros((28, 28), np.float32)
+            ax.imshow(img, cmap='gray', vmin=0, vmax=max(float(img.max()), 1e-6))
+            ax.set_title(f"{lab[j]}" if lab[j] >= 0 else "–", fontsize=6, pad=1)
+        cc = d.get('class_counts2')
+        extra = ''
+        if cc is not None and len(cc):
+            pur = cc.max(1) / np.maximum(cc.sum(1), 1); act = cnt >= 10
+            extra = f"; median class purity {np.median(pur[act]):.2f}" if act.any() else ''
+        dist = d.get('distinct_test')
+        if dist is not None and len(dist):
+            extra += f"; {float(np.mean(dist)):.1f} distinct neurons and {float(np.mean(d['spikes_test'])):.1f} spikes per test image"
+        fig.suptitle("Layer 2: the average test image each neuron fired for (spike-triggered average; title = assigned digit, "
+                     f"black = never fired){extra}", fontsize=9)
+        _footer(fig, cfg); fig.tight_layout(rect=(0, 0.02, 1, 0.96)); fig.savefig(run_dir / 'F16_layer2_sta.png', dpi=150); plt.close(fig)
 
     return spike_time

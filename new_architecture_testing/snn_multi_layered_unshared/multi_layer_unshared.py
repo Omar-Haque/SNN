@@ -86,6 +86,10 @@ class excitatory_neurons(nn.Module):
         super(excitatory_neurons, self).__init__()
         self.num_neurons: int = num_neurons
         self.wta: bool = wta   # hard winner-take-all per timestep (the base file's commented-out block); off = baseline behaviour
+        # NEW (--l2-k, results_for_cnn_replication): k winners per image. None = off (baseline behaviour). When set, the first k
+        # neurons to cross threshold during an image become that image's winners; from then on only they may fire. See _k_winners.
+        self.k_winners: int | None = None
+        self.winners: torch.Tensor | None = None    # (B, N) bool: the current image's winners so far
         self.theta_base:  float = -52.0                # The biological firing threshold
         self.theta_plus:  float = theta_plus
         self.theta_decay: float = math.exp(-1.0 / theta_decay_tau_steps)
@@ -109,6 +113,7 @@ class excitatory_neurons(nn.Module):
         self.g_e   = torch.zeros(batch_size, self.num_neurons, device=device)
         self.g_i   = torch.zeros(batch_size, self.num_neurons, device=device)
         self.theta = self.theta.to(device) # type: ignore
+        self.winners = torch.zeros(batch_size, self.num_neurons, dtype=torch.bool, device=device)   # NEW (--l2-k): no winners yet
 
     def forward(self, x_exc: torch.Tensor, x_inh: torch.Tensor, learning: bool = True) -> torch.Tensor:
         if self.v is None or self.theta is None:
@@ -119,11 +124,14 @@ class excitatory_neurons(nn.Module):
         self.v += x_exc - x_inh
         self.raw_v: torch.Tensor = self.v.clone()
         spikes: torch.Tensor = (self.v >= self.theta).float()
+        # NEW (--l2-k): with k winners per image, the k-winner rule replaces the one-spike-per-millisecond tie-break below.
+        if self.k_winners:
+            spikes = self._k_winners(spikes)
         # NEW (the base file's commented-out WTA block, switched on by --l2-wta): keep at most one spike per image per millisecond.
         # A copy of v gets -inf wherever the neuron did not cross threshold, argmax picks the crossing neuron with the highest v,
         # scatter_ builds a one-hot mask, and the product keeps only that spike. If no neuron crossed, argmax returns 0 but that
         # neuron's spike is 0, so the mask changes nothing.
-        if self.wta:
+        elif self.wta:
             # Resolve simultaneous threshold crossings: per image, only the spiking neuron with the highest potential fires.
             competing_v = self.v.clone()
             competing_v[spikes == 0.0] = -float("inf")
@@ -138,6 +146,23 @@ class excitatory_neurons(nn.Module):
             if self.theta_max is not None:
                 self.theta.clamp_(max=self.theta_max)
         return spikes
+
+    def _k_winners(self, spikes: torch.Tensor) -> torch.Tensor:
+        # NEW (--l2-k). An image's winners may always fire. A neuron that crosses threshold and is not yet a winner joins the
+        # winners while the image has fewer than k of them; if more cross in the same millisecond than there are free places,
+        # the ones with the highest potential take them (the --l2-wta tie-break, generalised to k). Every other crossing is
+        # dropped. Together with DiehlAndCookNetwork.forward (no inhibition until the image has its k winners, and winners never
+        # inhibit each other) this makes the first k neurons to reach threshold -- the k best-matching templates -- share the image.
+        assert self.winners is not None and self.v is not None and self.k_winners is not None
+        kmax = min(int(self.k_winners), self.num_neurons)
+        free = kmax - self.winners.sum(dim=1)                                      # (B,) places left for this image
+        new = (spikes > 0) & ~self.winners                                          # crossed threshold, not yet a winner
+        top_v, top_i = torch.topk(self.v.masked_fill(~new, -float("inf")), kmax, dim=1)   # best newcomers first, (B, kmax)
+        rank = torch.arange(kmax, device=spikes.device).unsqueeze(0)
+        take = (rank < free.unsqueeze(1)) & torch.isfinite(top_v)                   # within the free places, and a real crossing
+        admit = torch.zeros_like(spikes).scatter_(1, top_i, take.float())
+        self.winners = self.winners | (admit > 0)
+        return spikes * self.winners.float()
 
 
 # =====================================================================================================================
@@ -188,6 +213,13 @@ class DiehlAndCookNetwork(nn.Module):
     def forward(self, input_spikes: torch.Tensor, learning: bool = True) -> torch.Tensor:
         x_exc: torch.Tensor = self.synapses(input_spikes)
         x_inh: torch.Tensor = torch.matmul(self.prev_spikes, self.inh_matrix)
+        if self.neurons.k_winners:
+            # NEW (--l2-k): winners are never inhibited (by each other); the other neurons only once their image has its k
+            # winners -- until then nobody is inhibited, so the next-best neurons can still reach threshold and join.
+            w = self.neurons.winners
+            assert w is not None
+            full = (w.sum(dim=1, keepdim=True) >= self.neurons.k_winners).float()
+            x_inh = x_inh * (~w).float() * full
         current_spikes: torch.Tensor = self.neurons(x_exc, x_inh, learning=learning)
         if learning:
             self.x_trace = (self.x_trace * self.decay_x) + input_spikes
@@ -506,6 +538,37 @@ def evaluate_network(model, data_loader: DataLoader, neuron_assignments: torch.T
     return accuracy
 
 
+@torch.no_grad()
+def layer2_test_stats(model, data_loader: DataLoader, device: torch.device, num_steps: int) -> dict:
+    # NEW (results_for_cnn_replication): one pass over the scoring images (test 0-999) with learning off, keeping each image's
+    # layer-2 spike counts. Returns
+    #   sta2 (N, 784)        spike-triggered average: the mean input image each neuron fired for, weighted by its spike count
+    #                        (whole-digit prototypes look like digits here; part-detectors show a stroke or loop)
+    #   sta2_count (N,)      total spikes of each neuron on these images (0 = never fired)
+    #   class_counts2 (N,10) each neuron's spikes per true class: class purity = top class / total (~1 for a one-digit
+    #                        prototype, lower for a part several digits share)
+    #   distinct_test (I,)   distinct layer-2 neurons that fired on each image; spikes_test (I,) its layer-2 spikes
+    model.eval()
+    n = model.num_neurons
+    sta = torch.zeros(n, 784, device=device); cnt = torch.zeros(n, device=device); cls = torch.zeros(n, 10, device=device)
+    distinct, spikes = [], []
+    for data, targets in data_loader:
+        B = data.shape[0]; data, targets = data.to(device), targets.to(device)
+        spike_data = spikegen.rate(data * 0.1, num_steps=num_steps).view(num_steps, B, 784)   # type: ignore
+        model.reset(B, device)
+        counts = torch.zeros(B, n, device=device)
+        for t in range(num_steps):
+            counts += model(spike_data[t], learning=False)
+        sta += counts.t() @ data.view(B, 784).float()
+        cnt += counts.sum(0)
+        onehot = torch.zeros(B, 10, device=device); onehot[torch.arange(B, device=device), targets.long()] = 1.0
+        cls += counts.t() @ onehot
+        distinct.append((counts > 0).sum(1).float().cpu()); spikes.append(counts.sum(1).cpu())
+    sta = sta / cnt.clamp(min=1).unsqueeze(1)
+    return {"sta2": sta.cpu().numpy(), "sta2_count": cnt.cpu().numpy(), "class_counts2": cls.cpu().numpy(),
+            "distinct_test": torch.cat(distinct).numpy(), "spikes_test": torch.cat(spikes).numpy()}
+
+
 # =====================================================================================================================
 # Helpers
 # =====================================================================================================================
@@ -764,6 +827,7 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
     k2 = max(3, int(round(model.l2.n_inputs / 7.84)))
     P, A, S, R, H, C, L = [], [], [], [], [], [], []             # points, acc, shifted acc, reservoir, hijack, conf, assignments
     WS, TH, SH, RC, L1U = [], [], [], [], []                       # window spikes, theta, sharpness, recruit steps, layer-1 usage
+    DS = []                                                         # NEW: distinct layer-2 neurons per image (last batch) at each snapshot
     # recruit_step[j] = examples seen when neuron j's template first reached a top-k share of 0.35 (NaN until then)
     recruit_step = np.full(n, np.nan)
     W_prev = model.l2.synapses.weight.detach().clone(); W_init = W_prev.clone(); CI, RI = [], []   # cosine to the initial row per snapshot, reservoir by that criterion
@@ -814,11 +878,19 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
                 # neuron took the presentation). The spikes-per-presentation numbers divide by snapshot_interval x B; at the very first
                 # snapshot (batch 0) only one batch has been counted, which is why the first logged value is ~1/100 of the real one.
                 distinct = float((bts > 0).sum(dim=1).float().mean())
+                DS.append(distinct)
                 l1_rate = (float(L1U[-1].sum()) / max(1, snapshot_interval * B)) if L1U else float("nan")
                 print(f"[layer 2] {total:>7d} ex | held-out acc {acc:5.1f}% shifted {acc_s:5.1f}% | reservoir {res:3d} (unmoved rows {res_init:3d}, cos-to-init med {np.median(ci):.2f}) | hijacker idx {hij:4.2f} | "
                       f"L2 spikes/presentation {ws.sum() / max(1, snapshot_interval * B):5.1f} from {distinct:4.1f} distinct neurons (last batch) | L1 spikes/presentation {l1_rate:5.1f} | {(time.time() - t0) / 60:5.1f} min")
             gbi += 1
     print("Training complete")
+    # NEW (results_for_cnn_replication): what each layer-2 neuron fires for on the 1,000 test digits (see layer2_test_stats)
+    fs = layer2_test_stats(model, eval_loader, device, num_steps)
+    fired = fs["sta2_count"] > 0
+    pur = fs["class_counts2"].max(1) / np.maximum(fs["class_counts2"].sum(1), 1)
+    active = fs["sta2_count"] >= 10
+    print(f"[layer 2] test digits: {fs['distinct_test'].mean():.1f} distinct neurons and {fs['spikes_test'].mean():.1f} spikes per image; "
+          f"{int(fired.sum())}/{n} neurons fired; median class purity {np.median(pur[active]) if active.any() else float('nan'):.2f}")
     # Summary for run.json and the plotting code (multi_layer_plots.py, adapted from test2/test4). spike_time = when the accuracy
     # curve shows the hypothesis-work "spike" (NaN if none); final accuracy = mean of the last 3 snapshots. Several keys here
     # and in the npz (intervention_step_actual, anneal_step_actual, n_refill, theta_plus_late, cooper_*, imprinted, refilled)
@@ -830,6 +902,9 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
         "untrained_threshold": 0.35, "top_k": k2, "n_refill": 0, "theta_plus_late": None,
         "num_neurons": n, "l2_inputs": model.l2.n_inputs, "device": str(device), "minutes": (time.time() - t0) / 60,
         "final_accuracy": float(np.mean(A[-3:])), "final_accuracy_shifted": float(np.nanmean(S[-3:])),
+        "test_distinct_per_image": float(fs["distinct_test"].mean()), "test_spikes_per_image": float(fs["spikes_test"].mean()),
+        "test_neurons_fired": int(fired.sum()),
+        "class_purity_median": float(np.median(pur[active])) if active.any() else None,
         "l1": None if l1_hist is None else {"converged_at": l1_hist["converged_at"], "frozen_at": l1_hist["frozen_at"], "minutes": l1_hist["minutes"],
                                             "P": model.l1.P, "F": model.l1.F, "K": model.l1.K, "side": model.l1.side},   # type: ignore
     })
@@ -843,6 +918,10 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
                imprinted=np.zeros(n, bool), refilled=np.zeros(n, bool),
                cos_init_snap=np.array(CI), reservoir_init=np.array(RI), W2_init=W_init.float().cpu().numpy().astype(np.float16),
                W2=model.l2.synapses.weight.detach().float().cpu().numpy().astype(np.float16))
+    # NEW (results_for_cnn_replication): distinct neurons per image at each snapshot, and the final test-digit statistics
+    npz.update(distinct_snap=np.array(DS, dtype=np.float32), sta2=fs["sta2"].astype(np.float16), sta2_count=fs["sta2_count"].astype(np.float32),
+               class_counts2=fs["class_counts2"].astype(np.float32), distinct_test=fs["distinct_test"].astype(np.float32),
+               spikes_test=fs["spikes_test"].astype(np.float32))
     # layer-1 arrays (templates, thetas, the stage-A history) are saved too, so a run can be analysed or replayed later
     if model.l1 is not None and l1_hist is not None:
         npz.update(W1=model.l1.templates().float().cpu().numpy().astype(np.float32), l1_theta=model.l1.theta.detach().float().cpu().numpy().astype(np.float32),
@@ -857,6 +936,14 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
     np.savez(run_dir / "run.npz", **npz)
     (run_dir / "run.json").write_text(json.dumps(out, indent=2))
     make_run_figures(run_dir)
+    try:   # README.md in the run folder: every setting, layer by layer, and the command line (describe_runs.py); never fails the run
+        import importlib.util
+        _spec = importlib.util.spec_from_file_location("two_layer_describe_runs", Path(__file__).resolve().parent / "describe_runs.py")
+        _describe = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_describe)      # type: ignore[union-attr]
+        _describe.write_run_readme(run_dir, sys.argv[1:], torch.cuda.get_device_name(device) if torch.device(device).type == "cuda"
+                                   else torch.device(device).type)
+    except Exception as e:                                                                                # noqa: BLE001
+        print(f"(run README not written: {e})")
     print(f"\nrun finished in {out['minutes']:.1f} min | final acc {out['final_accuracy']:.1f}% shifted {out['final_accuracy_shifted']:.1f}% | spike time {spike_time if spike_time == spike_time else 'none'} | {run_dir}")
 
 
@@ -880,6 +967,9 @@ def main() -> None:
     # --theta-tau (layer 2) is also in examples; None = no decay (the base file's 1e7-timestep constant)
     p.add_argument("--neurons", type=int, default=400); p.add_argument("--theta-plus", type=float, default=0.5); p.add_argument("--theta-tau", type=float, default=None)
     p.add_argument("--inhibition", type=float, default=200.0)
+    p.add_argument("--l2-k", type=int, default=None, help="k winners per image in layer 2: the first k neurons to reach threshold share "
+                   "the image and fire freely (no inhibition among them, none at all until there are k); every other neuron is "
+                   "silenced. Replaces --l2-wta's one-spike-per-millisecond rule. Default: off (baseline behaviour)")
     p.add_argument("--l2-wta", action="store_true", help="hard winner-take-all per timestep in layer 2 (resolves simultaneous crossings caused by layer 1's synchronous bursts); off = baseline behaviour")
     p.add_argument("--l1-readout-inhibition", type=float, default=None, help="after stage A, run layer 1 with this within-window inhibition (mV) for layer-2 training and evaluation instead of --l1-inhibition; e.g. 17.5 lets a runner-up feature fire too, so codes of two instances of a class overlap more")
     p.add_argument("--l1-wta", action="store_true", help="within-window tie-break in layer 1: when several features of a window cross threshold in the same step, only the highest fires; off = baseline behaviour")
@@ -945,6 +1035,7 @@ def main() -> None:
     tau2 = 1e7 if args.theta_tau is None else args.theta_tau * args.steps / 32
     l2 = DiehlAndCookNetwork(n_in, args.neurons, args.theta_plus, args.inhibition, tau2, None, l2_norm, l2_wmax, wta=bool(args.l2_wta))
     l2.lr_plus *= args.l2_lr_mult; l2.lr_minus *= args.l2_lr_mult      # both rates together, so the potentiation/depression ratio is unchanged
+    if args.l2_k: l2.neurons.k_winners = int(args.l2_k)                # NEW: k winners per image (see excitatory_neurons._k_winners)
     model = TwoLayerNetwork(l1, l2, args.pool2).to(device)
 
     # Run folder name: architecture, layer-2 theta settings, epochs, seed, then one tag per non-default option and a time stamp,
@@ -956,6 +1047,8 @@ def main() -> None:
     if args.l1_norm != 12.0 and not args.no_l1: run_name += f"_l1n{args.l1_norm:g}"                # layer-1 row sum (drive)
     if args.l1_theta_plus != 0.1 and not args.no_l1: run_name += f"_l1tp{args.l1_theta_plus:g}"    # layer-1 conscience
     if args.l2_wta: run_name += "_l2wta"
+    if args.inhibition != 200.0: run_name += f"_inh{args.inhibition:g}"       # layer-2 lateral inhibition (mV)
+    if args.l2_k: run_name += f"_k{args.l2_k}"                                 # k winners per image
     if args.l2_drive != 1.2 and not args.no_l1: run_name += f"_drv{args.l2_drive:g}"
     if args.l2_lr_mult != 1.0: run_name += f"_lr{args.l2_lr_mult:g}"
     if args.dataset != "mnist": run_name += f"_{args.dataset}"
@@ -975,6 +1068,7 @@ def main() -> None:
            "l1_inhibition": args.l1_inhibition, "l1_stdp_reduce": args.l1_stdp_reduce, "l1_examples": args.l1_examples, "l1_snapshot": args.l1_snapshot,
            "l1_stop_stationary": bool(args.l1_stop_stationary), "l2_inputs": n_in, "l2_norm": l2_norm, "l2_wmax": l2_wmax, "shift": args.shift}
     cfg["dataset"] = args.dataset; cfg["input_norm"] = bool(args.input_norm)
+    cfg["l2_k"] = args.l2_k
     print("config:", json.dumps(cfg))
     # stage A (skipped for --no-l1)
     l1_hist = train_layer1(model, l1_loader, device, cfg, (assign_loader, eval_loader, shifted_loader)) if l1 is not None else None

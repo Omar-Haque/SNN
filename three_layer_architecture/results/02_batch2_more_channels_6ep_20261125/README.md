@@ -121,6 +121,10 @@ per ms per presentation, both pathways with `--l3-skip`); "dead" = layer-2 neuro
   two-layer 85.3 / 87.3 on the same seeds. The share of layer 3's weight on layer-2 lines ends at 13 % (it started at 17 %);
   with the 8 mV layer 2 it ends at 21 % (start 17 %), with the stride-1 layer 2 at 46 % (start 40 %). Layer 3 moves weight
   toward layer 1, not toward the parts.
+  *Batch-3 note: this reading was wrong. In every skip run the layer-2 weight share tracks layer 2's share of layer 3's
+  input spikes (here 15 % of the spikes, 13 % of the weight; 23 → 21 %; 48 → 46 %), because STDP with row normalisation
+  gives weight roughly in proportion to how often each line fires. The share cannot show whether layer 3 uses layer 2; an
+  ablation can. See `../03_batch3_sparse_trained_layer2_6ep_20261126/`.*
 - **No shift gain anywhere:** shifted accuracy 48–56 % (two layers 56.5–57.4, single layer 60.6).
 - **Best three-layer runs:** 85.1 / 84.7 % with the skip connection (≈ two layers), 84.2 % without it (layer 2 trained at
   200 mV, read at 8 mV; one seed). Still under the two-layer mean (86.3) and the single layer (85.6) on centred digits.

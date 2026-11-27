@@ -59,6 +59,7 @@ first batch, every `--snapshot-interval` batches (200 = 6,400 images) and at its
 | `three_layer.py` | the network and training; imports layer 1, layer 3, the estimators and stage A from `../new_architecture_testing/snn_multi_layered_unshared/multi_layer_unshared.py` (a change there changes these runs too) |
 | `three_layer_plots.py` | the figures of one run (numpy + matplotlib); `python three_layer.py --replot <run dir>` redraws them |
 | `summarize_three_layer.py` | every finished run under `results/` → `results/summary.csv`, `results/S1_accuracy_overlay.png` |
+| `describe_runs.py` | the README.md in each run folder: every setting, layer by layer, the command line and Unity job, the main results. `three_layer.py` writes it at the end of every run; to redo one by hand (plain Python, no torch): `python describe_runs.py <batch or run dir> ...` |
 | `sta_replay.py` | spike-triggered averages (F6, F7) for runs made before `three_layer.py` saved them (batch 1), in numpy: `python sta_replay.py <run dir> ...` |
 | `../unity/submit_three_layer.sh` | the current Unity batch (and `smoke`, and resubmitting jobs by name) |
 | `results/<batch folder>/` | one folder per batch with a README.md (configuration, questions, results); one subfolder per run |
@@ -95,6 +96,7 @@ cd three_layer_architecture && python three_layer.py --smoke    # or one smoke r
 
 bash unity/submit_three_layer.sh                   # on Unity: the current batch (smoke-unity = the smoke run as a Unity job)
 python three_layer_architecture/summarize_three_layer.py    # after the runs: results/summary.csv and S1
+python three_layer_architecture/describe_runs.py three_layer_architecture/results/<batch folder>   # a README.md per run
 ```
 A local smoke run trains every stage on 448–640 images at 25 ms per presentation (layers 2 and 3 barely fire that early)
 and scores on 64–128, so its accuracies mean nothing; it checks that the whole code path — all three stages, both calibrations, scoring, saving and the five
@@ -104,5 +106,5 @@ figures — runs for that configuration. Logs and run folders go to `results/smo
 | folder | question | outcome |
 |---|---|---|
 | `results/01_batch1_first_three_layer_6ep_20261125/` | Does a third layer keep the centred-digit accuracy, and what do the first layer-2 choices (readout, overlap, block size, learning rate) do? | 73–80 % vs two layers' 85–87 %; no shift gain. Layer 3 hears ~20 layer-2 channels per image (two layers: 343) and accuracy follows the channel count (8 mV readout 80.3, stride 1 79.4). Layer-2 features are sharp stroke combinations (F6); the pictures in F3/F4 are blurred by the drawing method. |
-| `results/02_batch2_more_channels_6ep_20261125/` | Layer 2's features are good (F6) but layer 3 hears ~20 channels per image: what gives it more (softer readout, overlap, more features, smaller blocks, skip connection), and does training layer 2 on the sharper layer-1 code help? 19 jobs | Best 84.2 % without skip (layer 2 trained on the 200 mV layer-1 code, read at 8 mV) and 85.1 / 84.7 % with a skip connection (≈ two layers; layer 3 ignores layer 2). More channels plateaus at ~83 %; more features per block mostly die. No shift gain. |
-| `results/03_batch3_sparse_trained_layer2_6ep_20261126/` | Does batch 2's best (layer 2 trained on the 200 mV layer-1 code, read at 8 mV) replicate, why does it work, and does it combine with more channels or the skip connection? 13 jobs | pending |
+| `results/02_batch2_more_channels_6ep_20261125/` | Layer 2's features are good (F6) but layer 3 hears ~20 channels per image: what gives it more (softer readout, overlap, more features, smaller blocks, skip connection), and does training layer 2 on the sharper layer-1 code help? 19 jobs | Best 84.2 % without skip (layer 2 trained on the 200 mV layer-1 code, read at 8 mV) and 85.1 / 84.7 % with a skip connection (≈ two layers; layer 3's weight on layer 2 follows its spike share — see batch 3). More channels plateaus at ~83 %; more features per block mostly die. No shift gain. |
+| `results/03_batch3_sparse_trained_layer2_6ep_20261126/` | Does batch 2's best (layer 2 trained on the 200 mV layer-1 code, read at 8 mV) replicate, why does it work, and does it combine with more channels or the skip connection? 13 jobs | Replicates at 83.7 % (3 seeds). The gain is half the features learned on the sparse code (+1.6) and half reading them with the richer 8 mV layer-1 code (+1.8); 17.5 mV is sparse enough. +1.3–3.4 points over the 8 mV-trained layer 2 in all 8 matched configurations. Best without skip 86.0 % (3×3/1 blocks, 4 mV readout; one seed) ≈ two layers; skip 86.1 / 85.2 % ≈ two layers. The skip runs' weight share on layer 2 just follows its spike share, so it can't show whether layer 3 uses layer 2. No shift gain. |

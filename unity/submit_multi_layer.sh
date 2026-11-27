@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Batch 8 (2026-11-26): per-image input normalisation (--input-norm). On Fashion-MNIST (batch 7) the best two-layer network
-# lost 6 points to the single layer (63.5 / 64.2 vs 69.4 / 69.6 %), mostly on sandals (recall 22 vs ~70 %): light images make
-# few layer-1 spikes (sandals ~500 per image vs 1,782 on average), so layer 2, calibrated to the average image, forms almost no
-# sandal neurons. --input-norm scales every image to the training set's mean intensity. Both networks, unchanged otherwise, on
-# Fashion-MNIST (two seeds each) and on MNIST (one seed each: does it cost anything there?). Same regime as batches 2-7. Runs go
-# to new_architecture_testing/snn_multi_layered_unshared/results_2/09_batch8_input_norm_6ep_20261126/ (its README.md lists the
-# questions).
+# results_for_cnn_replication, batch 1 (2026-11-27): several winners per image in layer 2. In the best two-layer network
+# (batch 6: stride 2, layer 1 read at 8 mV, drive 0.36, lr x10; 85.3 / 87.3 %), layer 2 is a whole-image layer where one
+# neuron wins each image, so its neurons learn whole-digit prototypes. A CNN's upper layers learn parts instead. This batch lets
+# several layer-2 neurons share each image -- softer lateral inhibition (50 / 20 / 8 mV), or exactly k winners per image (new
+# --l2-k: 2 / 3 / 5 / 10) -- and records what each neuron fires for (F16, class purity, distinct neurons per image). MNIST,
+# same regime as batches 6-8. Runs go to
+# new_architecture_testing/snn_multi_layered_unshared/results_for_cnn_replication/01_batch1_several_winners_6ep_20261127/ (its
+# README.md lists the questions; the README one folder up explains the aim). Batch 8's version of this script:
+# git show 1d7b3b8:unity/submit_multi_layer.sh
 #
 #   bash unity/submit_multi_layer.sh smoke              # ON YOUR OWN COMPUTER, no queue: each job's exact configuration on
 #                                                       # tiny settings, one after another -> pass / fail per job
-#   bash unity/submit_multi_layer.sh smoke ml8_fm_best_in   # ... only the jobs named
-#   bash unity/submit_multi_layer.sh                    # the six jobs on Unity
-#   bash unity/submit_multi_layer.sh ml8_fm_best_in_s1  # only the jobs named (e.g. to resubmit failed ones)
+#   bash unity/submit_multi_layer.sh smoke c1_k3        # ... only the jobs named
+#   bash unity/submit_multi_layer.sh                    # the 11 jobs on Unity
+#   bash unity/submit_multi_layer.sh c1_k3 c1_k5s1      # only the jobs named (e.g. to resubmit failed ones)
 #
 # Fashion-MNIST is downloaded to <repo>/data/FashionMNIST on first use. Unity compute nodes may have no internet, so in Unity
 # mode this script downloads it first, here on the login node (with the snn environment active), before submitting.
@@ -20,7 +22,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."                         # repo root
 S=new_architecture_testing/snn_multi_layered_unshared/multi_layer_unshared.py
 SDIR=$(dirname "$S")
-OUT=results_2/09_batch8_input_norm_6ep_20261126
+OUT=results_for_cnn_replication/01_batch1_several_winners_6ep_20261127
 
 PY=${PYTHON:-python}
 command -v "$PY" >/dev/null 2>&1 || PY=python3
@@ -45,7 +47,7 @@ if [ ! -f data/FashionMNIST/raw/t10k-labels-idx1-ubyte ]; then
     fi
 fi
 
-COMMON="--theta-tau 30000 --epochs 6 --snapshot-interval 200 --input-norm --results-dir $OUT"
+COMMON="--theta-tau 30000 --epochs 6 --snapshot-interval 200 --results-dir $OUT"   # MNIST, no input normalisation (as batch 6)
 SINGLE="--no-l1 --l2-wta"                                                       # batch 2's single-layer reference
 BEST="--stride 2 --l1-readout-inhibition 8 --l1-wta --l2-wta --l2-drive 0.36 --l2-lr-mult 10"   # batch 6's best two-layer network
 WANT=" $* "; DONE=" "; PASSED=" "; FAILED=" "
@@ -66,12 +68,22 @@ job() {   # job NAME TIME ARGS...: run / submit unless job names were given on t
         echo "FAILED after $((SECONDS - t0)) s -- last lines of $log:"; tail -n 15 "$log" | sed 's/^/    /'; FAILED="$FAILED$name "
     fi
 }
-job ml8_fm_single_in     05:00:00 $COMMON --dataset fmnist $SINGLE --seed 0    # Fashion-MNIST, normalised
-job ml8_fm_single_in_s1  05:00:00 $COMMON --dataset fmnist $SINGLE --seed 1
-job ml8_fm_best_in       05:00:00 $COMMON --dataset fmnist $BEST --seed 0
-job ml8_fm_best_in_s1    05:00:00 $COMMON --dataset fmnist $BEST --seed 1
-job ml8_mn_single_in     05:00:00 $COMMON --dataset mnist $SINGLE --seed 0     # MNIST, normalised: does it cost anything?
-job ml8_mn_best_in       05:00:00 $COMMON --dataset mnist $BEST --seed 0
+T=06:00:00                                      # batch 8's MNIST two-layer run took 2.4 h
+# reference: the best two-layer network unchanged (one winner per image); batch 6 gave 85.3 / 56.5 % on seed 0
+job c1_base   $T $COMMON $BEST --seed 0
+# softer layer-2 lateral inhibition: the winner's spikes no longer silence everyone, so runner-up neurons can fire too
+job c1_inh50  $T $COMMON $BEST --inhibition 50 --seed 0
+job c1_inh20  $T $COMMON $BEST --inhibition 20 --seed 0
+job c1_inh8   $T $COMMON $BEST --inhibition 8 --seed 0
+# exactly k winners per image: the first k neurons to reach threshold share the image, everyone else is silenced
+job c1_k2     $T $COMMON $BEST --l2-k 2 --seed 0
+job c1_k3     $T $COMMON $BEST --l2-k 3 --seed 0
+job c1_k5     $T $COMMON $BEST --l2-k 5 --seed 0
+job c1_k10    $T $COMMON $BEST --l2-k 10 --seed 0
+job c1_k3tp1  $T $COMMON $BEST --l2-k 3 --theta-plus 1.0 --seed 0   # each neuron now wins ~3x as many images: a stronger threshold rise per spike makes frequent winners give way sooner
+# second seeds of a middle setting from each family
+job c1_i20s1  $T $COMMON $BEST --inhibition 20 --seed 1
+job c1_k5s1   $T $COMMON $BEST --l2-k 5 --seed 1
 for n in $*; do [[ "$DONE" == *" $n "* ]] || echo "no job named $n in this batch"; done
 if [ "$MODE" = local ]; then
     echo; echo "passed:${PASSED% }"; echo "failed:${FAILED% }"
@@ -82,4 +94,4 @@ fi
 squeue --me
 # afterwards, on the login node (from the repo root):
 #   conda activate snn && python new_architecture_testing/snn_multi_layered_unshared/summarize_multi_layer.py \
-#       --results new_architecture_testing/snn_multi_layered_unshared/results_2
+#       --results new_architecture_testing/snn_multi_layered_unshared/results_for_cnn_replication

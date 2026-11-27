@@ -41,6 +41,10 @@ neurons.
   accuracy; from 2026-11-15 on it starts at image 0: during stage A layer 1 is scored as the output layer (teal), after
   the freeze layer 2 is (blue). F1–F7 use total training images on the x-axis, and a green dashed line marks the
   end of stage A instead of the old "spike at" line), F13 (layer-2 templates projected to image space), `summary.csv` / S1 / S2.
+- F16 (from 2026-11-27): what each layer-2 neuron fires for — the average test image per neuron (spike-triggered
+  average), with class purity and distinct neurons per test digit (run.json `class_purity_median`,
+  `test_distinct_per_image`). `--l2-k K` lets K layer-2 neurons share each image; those experiments, aimed at part-like
+  features as in a CNN, are in `results_for_cnn_replication/`. Every run folder gets a README.md with all its settings.
 
 ## Diagnostics
 - `replay_layer1.py results/<run> [--inhibition X --no-wta --pooling]`: torch-free replay of the frozen layer 1 on test digits —

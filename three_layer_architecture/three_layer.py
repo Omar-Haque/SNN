@@ -397,6 +397,14 @@ def train_layer3(model: ThreeLayerNetwork, train_loader: DataLoader, loaders: tu
     np.savez(run_dir / "run.npz", **npz)
     (run_dir / "run.json").write_text(json.dumps(out, indent=2))
     make_figures(run_dir)
+    try:   # README.md in the run folder: every setting, layer by layer, and the command line (describe_runs.py); never fails the run
+        import importlib.util
+        _spec = importlib.util.spec_from_file_location("three_layer_describe_runs", HERE / "describe_runs.py")
+        _describe = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_describe)      # type: ignore[union-attr]
+        _describe.write_run_readme(run_dir, sys.argv[1:], torch.cuda.get_device_name(device) if torch.device(device).type == "cuda"
+                                   else torch.device(device).type)
+    except Exception as e:                                                                                # noqa: BLE001
+        print(f"(run README not written: {e})")
     print(f"\nrun finished in {out['minutes']:.1f} min | final acc {out['final_accuracy']:.1f}% shifted {out['final_accuracy_shifted']:.1f}% | "
           f"last-3-epochs average {out['last3_epochs_accuracy']:.1f}% / {out['last3_epochs_accuracy_shifted']:.1f}% | {run_dir}")
 
