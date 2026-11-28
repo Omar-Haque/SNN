@@ -201,6 +201,16 @@ class DiehlAndCookNetwork(nn.Module):
         self.prev_spikes: torch.Tensor = torch.empty(0)
         self.x_trace: torch.Tensor = torch.empty(0)
         self.y_trace: torch.Tensor = torch.empty(0)
+        # NEW (results_for_cnn_replication), all off by default (baseline behaviour):
+        #   explain   --l2-explain: explaining away (needs k winners, --l2-k). Each winner claims the input lines its template
+        #             covers; every other neuron only receives the lines no winner has claimed yet, and each winner learns from
+        #             what the OTHER winners leave. See _explained_drive / _explained_post.
+        #   lat_lr    --l2-lat-lr: learned lateral inhibition. After every batch the inhibition between two neurons grows in
+        #             proportion to how often they fired on the same image, and shrinks slowly otherwise (lat_target = the
+        #             fraction of neurons that should fire per image; lat_max = ceiling in mV). See update_lateral.
+        self.explain: bool = False
+        self._explain_state: tuple | None = None
+        self.lat_lr: float = 0.0; self.lat_target: float = 0.0125; self.lat_max: float = 200.0
 
     def reset(self, batch_size: int, device: torch.device) -> None:
         self.neurons.reset(batch_size, device)
@@ -211,7 +221,7 @@ class DiehlAndCookNetwork(nn.Module):
         self.y_trace     = torch.zeros(batch_size, self.num_neurons, device=device)
 
     def forward(self, input_spikes: torch.Tensor, learning: bool = True) -> torch.Tensor:
-        x_exc: torch.Tensor = self.synapses(input_spikes)
+        x_exc: torch.Tensor = self._explained_drive(input_spikes) if self.explain else self.synapses(input_spikes)
         x_inh: torch.Tensor = torch.matmul(self.prev_spikes, self.inh_matrix)
         if self.neurons.k_winners:
             # NEW (--l2-k): winners are never inhibited (by each other); the other neurons only once their image has its k
@@ -226,6 +236,8 @@ class DiehlAndCookNetwork(nn.Module):
             self.y_trace = (self.y_trace * self.decay_y) + current_spikes
             batch_size: int = input_spikes.shape[0]
             post_interaction: torch.Tensor = torch.matmul(current_spikes.t(), self.x_trace) / batch_size
+            if self.explain:   # NEW (--l2-explain): each spiking winner potentiates only on what the other winners leave
+                post_interaction = self._explained_post(current_spikes) / batch_size
             delta_w_plus: torch.Tensor = (self.lr_plus ) * post_interaction * (self.w_max - self.synapses.weight)
             pre_interaction = torch.matmul(self.y_trace.t(), input_spikes) / batch_size
             delta_w_minus = (self.lr_minus ) * pre_interaction * self.synapses.weight
@@ -235,6 +247,57 @@ class DiehlAndCookNetwork(nn.Module):
             self.synapses.weight.mul_(self.w_norm / weight_sum)
         self.prev_spikes = current_spikes
         return current_spikes
+
+    # ---- NEW (results_for_cnn_replication): explaining away and learned lateral inhibition --------------------------------
+    def _unit_templates(self) -> torch.Tensor:
+        # each neuron's weights scaled so its strongest line is 1: "how much of line j neuron i claims when it wins"
+        W = self.synapses.weight
+        return W / W.max(dim=1, keepdim=True).values.clamp(min=1e-12)
+
+    def _explained_drive(self, input_spikes: torch.Tensor) -> torch.Tensor:
+        # Explaining away. S = the sum of the current winners' unit templates (B, n_inputs): how much of each input line the
+        # winners already account for. A non-winner receives each line's spikes scaled by (1 - S), i.e. only what no winner
+        # has claimed, so the next winner is the neuron that best matches the REST of the image. A winner receives each line
+        # scaled by (1 - S + its own claim): its own template is not removed for it, the other winners' are. Winners are the
+        # k-winner set of excitatory_neurons as of the previous millisecond (none at the start of an image: everyone sees
+        # everything, as without this option).
+        w = self.neurons.winners
+        assert w is not None
+        T = self._unit_templates()
+        S = w.float() @ T
+        x_exc = self.synapses(input_spikes * (1.0 - S).clamp(min=0.0))
+        b, i = w.nonzero(as_tuple=True)
+        if b.numel():
+            g = (1.0 - S[b] + T[i]).clamp(0.0, 1.0)
+            x_exc[b, i] = (input_spikes[b] * g * self.synapses.weight[i]).sum(dim=1)
+        self._explain_state = (S, T, w.clone())
+        return x_exc
+
+    def _explained_post(self, current_spikes: torch.Tensor) -> torch.Tensor:
+        # The potentiation term of STDP under explaining away: for each neuron that spiked this millisecond, its presynaptic
+        # traces times the share of each line the OTHER winners leave (a neuron that joined this millisecond: what all earlier
+        # winners leave). Unscaled by the batch size (the caller divides). Shape (N, n_inputs), like matmul(spikes.T, x_trace).
+        assert self._explain_state is not None
+        S, T, w_prev = self._explain_state
+        post = torch.zeros_like(self.synapses.weight)
+        b, i = current_spikes.nonzero(as_tuple=True)
+        if b.numel():
+            g = (1.0 - S[b] + T[i] * w_prev[b, i].float().unsqueeze(1)).clamp(0.0, 1.0)
+            post.index_add_(0, i, self.x_trace[b] * g)
+        return post
+
+    @torch.no_grad()
+    def update_lateral(self, counts: torch.Tensor) -> None:
+        # Learned lateral inhibition (anti-Hebbian, after Foldiak 1990), once per batch. counts = (B, N) spikes per image.
+        # co[i, j] = fraction of the batch's images on which i and j both fired. inhibition[i, j] += lat_lr x (co - target^2):
+        # pairs that fire together more often than two independent neurons at the target rate would inhibit each other more,
+        # pushing them toward different images or different parts of an image; the rest slowly lose inhibition. Kept in
+        # [0, lat_max] mV, no self-inhibition.
+        y = (counts > 0).float()
+        co = y.t() @ y / max(1, y.shape[0])
+        self.inh_matrix += self.lat_lr * (co - self.lat_target ** 2)
+        self.inh_matrix.clamp_(min=0.0, max=self.lat_max)
+        self.inh_matrix.fill_diagonal_(0.0)
 
 
 # =====================================================================================================================
@@ -850,6 +913,7 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
                 bts += out
                 if l1_usage is not None: l1_usage += model.last_l1_spikes.view(B, -1, model.l1.F).sum(dim=(0, 1))   # type: ignore
             spikes_since += bts.sum(0); total += B
+            if model.l2.lat_lr: model.l2.update_lateral(bts)                    # NEW (--l2-lat-lr): learned lateral inhibition
             # snapshot at batch 0 and then every snapshot_interval batches (100 batches = 3,200 images by default)
             if gbi % snapshot_interval == 0:
                 # labels from train images 0-1999, accuracy on test images 0-999 and on their shifted copies, learning off: the
@@ -905,6 +969,8 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
         "test_distinct_per_image": float(fs["distinct_test"].mean()), "test_spikes_per_image": float(fs["spikes_test"].mean()),
         "test_neurons_fired": int(fired.sum()),
         "class_purity_median": float(np.median(pur[active])) if active.any() else None,
+        "lat_inh_final_mean": (float(model.l2.inh_matrix.sum() / max(1, n * (n - 1)))) if model.l2.lat_lr else None,
+        "lat_inh_final_frac_at_max": (float((model.l2.inh_matrix >= 0.9 * model.l2.lat_max).sum()) / max(1, n * (n - 1))) if model.l2.lat_lr else None,
         "l1": None if l1_hist is None else {"converged_at": l1_hist["converged_at"], "frozen_at": l1_hist["frozen_at"], "minutes": l1_hist["minutes"],
                                             "P": model.l1.P, "F": model.l1.F, "K": model.l1.K, "side": model.l1.side},   # type: ignore
     })
@@ -922,6 +988,7 @@ def train_layer2(model: TwoLayerNetwork, train_loader, assign_loader, eval_loade
     npz.update(distinct_snap=np.array(DS, dtype=np.float32), sta2=fs["sta2"].astype(np.float16), sta2_count=fs["sta2_count"].astype(np.float32),
                class_counts2=fs["class_counts2"].astype(np.float32), distinct_test=fs["distinct_test"].astype(np.float32),
                spikes_test=fs["spikes_test"].astype(np.float32))
+    if model.l2.lat_lr: npz["inh2"] = model.l2.inh_matrix.detach().float().cpu().numpy().astype(np.float16)   # the learned inhibition (mV)
     # layer-1 arrays (templates, thetas, the stage-A history) are saved too, so a run can be analysed or replayed later
     if model.l1 is not None and l1_hist is not None:
         npz.update(W1=model.l1.templates().float().cpu().numpy().astype(np.float32), l1_theta=model.l1.theta.detach().float().cpu().numpy().astype(np.float32),
@@ -967,6 +1034,13 @@ def main() -> None:
     # --theta-tau (layer 2) is also in examples; None = no decay (the base file's 1e7-timestep constant)
     p.add_argument("--neurons", type=int, default=400); p.add_argument("--theta-plus", type=float, default=0.5); p.add_argument("--theta-tau", type=float, default=None)
     p.add_argument("--inhibition", type=float, default=200.0)
+    p.add_argument("--l2-explain", action="store_true", help="explaining away in layer 2 (needs --l2-k): each winner claims the input "
+                   "lines its template covers; other neurons only receive unclaimed input, and each winner learns from what the other "
+                   "winners leave. Default: off")
+    p.add_argument("--l2-lat-lr", type=float, default=0.0, help="learned lateral inhibition in layer 2: mV added per batch per unit of "
+                   "co-activation (fraction of images on which two neurons both fired), minus lat-target^2. 0 = fixed inhibition (default)")
+    p.add_argument("--l2-lat-target", type=float, default=0.0125, help="target fraction of layer-2 neurons firing per image (5/400)")
+    p.add_argument("--l2-lat-max", type=float, default=200.0, help="ceiling of the learned inhibition (mV)")
     p.add_argument("--l2-k", type=int, default=None, help="k winners per image in layer 2: the first k neurons to reach threshold share "
                    "the image and fire freely (no inhibition among them, none at all until there are k); every other neuron is "
                    "silenced. Replaces --l2-wta's one-spike-per-millisecond rule. Default: off (baseline behaviour)")
@@ -1036,6 +1110,10 @@ def main() -> None:
     l2 = DiehlAndCookNetwork(n_in, args.neurons, args.theta_plus, args.inhibition, tau2, None, l2_norm, l2_wmax, wta=bool(args.l2_wta))
     l2.lr_plus *= args.l2_lr_mult; l2.lr_minus *= args.l2_lr_mult      # both rates together, so the potentiation/depression ratio is unchanged
     if args.l2_k: l2.neurons.k_winners = int(args.l2_k)                # NEW: k winners per image (see excitatory_neurons._k_winners)
+    if args.l2_explain:                                                # NEW: explaining away (see DiehlAndCookNetwork._explained_drive)
+        if not args.l2_k: raise SystemExit("--l2-explain needs --l2-k (explaining away acts between an image's winners)")
+        l2.explain = True
+    l2.lat_lr, l2.lat_target, l2.lat_max = float(args.l2_lat_lr), float(args.l2_lat_target), float(args.l2_lat_max)   # NEW: learned inhibition
     model = TwoLayerNetwork(l1, l2, args.pool2).to(device)
 
     # Run folder name: architecture, layer-2 theta settings, epochs, seed, then one tag per non-default option and a time stamp,
@@ -1049,6 +1127,8 @@ def main() -> None:
     if args.l2_wta: run_name += "_l2wta"
     if args.inhibition != 200.0: run_name += f"_inh{args.inhibition:g}"       # layer-2 lateral inhibition (mV)
     if args.l2_k: run_name += f"_k{args.l2_k}"                                 # k winners per image
+    if args.l2_explain: run_name += "_ea"                                       # explaining away
+    if args.l2_lat_lr: run_name += f"_lat{args.l2_lat_lr:g}" + (f"p{args.l2_lat_target:g}" if args.l2_lat_target != 0.0125 else "")   # learned inhibition
     if args.l2_drive != 1.2 and not args.no_l1: run_name += f"_drv{args.l2_drive:g}"
     if args.l2_lr_mult != 1.0: run_name += f"_lr{args.l2_lr_mult:g}"
     if args.dataset != "mnist": run_name += f"_{args.dataset}"
@@ -1069,6 +1149,7 @@ def main() -> None:
            "l1_stop_stationary": bool(args.l1_stop_stationary), "l2_inputs": n_in, "l2_norm": l2_norm, "l2_wmax": l2_wmax, "shift": args.shift}
     cfg["dataset"] = args.dataset; cfg["input_norm"] = bool(args.input_norm)
     cfg["l2_k"] = args.l2_k
+    cfg["l2_explain"] = bool(args.l2_explain); cfg["l2_lat_lr"] = args.l2_lat_lr; cfg["l2_lat_target"] = args.l2_lat_target; cfg["l2_lat_max"] = args.l2_lat_max
     print("config:", json.dumps(cfg))
     # stage A (skipped for --no-l1)
     l1_hist = train_layer1(model, l1_loader, device, cfg, (assign_loader, eval_loader, shifted_loader)) if l1 is not None else None

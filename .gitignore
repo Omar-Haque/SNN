@@ -14,3 +14,17 @@ temp/
 
 # Ignore venv
 venv/
+
+# macOS Finder metadata
+.DS_Store
+
+# Editors and notebooks
+.idea/
+.ipynb_checkpoints/
+
+# Smoke tests: tiny local check runs (unity/submit_*.sh smoke, --smoke); their numbers mean nothing
+smoke_tests/
+*_SMOKE_*/
+
+# Files set aside for deletion
+_to_delete/

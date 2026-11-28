@@ -41,11 +41,14 @@ how much digit information the parts carry.
 ## Batches
 | folder | question | result |
 |---|---|---|
-| `01_batch1_several_winners_6ep_20261127/` | Several layer-2 winners per image — softer lateral inhibition (50 / 20 / 8 mV) or exactly k winners (k = 2, 3, 5, 10; new `--l2-k`): do the neurons learn parts, and what happens to accuracy? 11 jobs | pending |
+| `01_batch1_several_winners_6ep_20261127/` | Several layer-2 winners per image — softer lateral inhibition (50 / 20 / 8 mV) or exactly k winners (k = 2, 3, 5, 10; new `--l2-k`): do the neurons learn parts, and what happens to accuracy? 11 jobs | **No parts**: every neuron still learns a whole digit (purity 0.87–1.00); sharing an image doesn't split it, and many winners (k = 10, 8 mV) merge 4s and 9s (72–77 %). **But k = 2 / 3 gives 89.2 / 88.7 %** (baseline 85.3, same seed; shifted 60.8 / 59.0): more neurons get trained and each digit is decided by its 2–3 closest prototypes. One seed. |
+| `02_batch2_parts_and_k_6ep_20261128/` | Three mechanisms that make neurons compete for the image's inputs — explaining away, learned lateral inhibition, local receptive fields at the top (large three-layer blocks) — and the k-winner lead followed up: seeds 1–2 on MNIST, Fashion-MNIST with input normalisation, k in the three-layer network's layer 3. 28 jobs (18 two-layer, 10 three-layer) | pending |
 
 Each batch folder's README.md has the configuration, the questions and the results, and every run folder has its own
-README.md with all its settings. `summary.csv` here covers every run in this folder:
+README.md with all its settings. `summary.csv` here covers every two-layer run in this folder, `three_layer_summary.csv` every three-layer run (from batch 2 on):
 ```bash
 python new_architecture_testing/snn_multi_layered_unshared/summarize_multi_layer.py \
+    --results new_architecture_testing/snn_multi_layered_unshared/results_for_cnn_replication
+python three_layer_architecture/summarize_three_layer.py --prefix three_layer_ \
     --results new_architecture_testing/snn_multi_layered_unshared/results_for_cnn_replication
 ```

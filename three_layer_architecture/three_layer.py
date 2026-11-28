@@ -226,8 +226,12 @@ def spike_triggered_averages(model: ThreeLayerNetwork, loader: DataLoader, devic
     c = l1.patch + (l2.block - 1) * l1.stride; o = l2.stride * l1.stride      # block area in pixels, and its step
     s2sum = torch.zeros(l2.P, l2.F, c, c, device=device); n2 = torch.zeros(l2.P, l2.F, device=device)
     s3sum = torch.zeros(l3.num_neurons, 28, 28, device=device); n3 = torch.zeros(l3.num_neurons, device=device)
-    for data, _ in loader:
+    # NEW (results_for_cnn_replication): spikes per neuron per true digit, for class purity (share of a neuron's spikes from its
+    # top digit: ~1 for a one-digit prototype, lower for a part several digits share)
+    k2 = torch.zeros(l2.N, 10, device=device); k3 = torch.zeros(l3.num_neurons, 10, device=device)
+    for data, targets in loader:
         B = data.shape[0]; data = data.to(device); img = data.view(B, 28, 28)
+        onehot = torch.zeros(B, 10, device=device); onehot[torch.arange(B, device=device), targets.to(device).long()] = 1.0
         spike_data = spikegen.rate(data * 0.1, num_steps=num_steps).view(num_steps, B, 784)   # type: ignore
         model.reset(B, device)
         c2 = torch.zeros(B, l2.N, device=device); c3 = torch.zeros(B, l3.num_neurons, device=device)
@@ -236,12 +240,22 @@ def spike_triggered_averages(model: ThreeLayerNetwork, loader: DataLoader, devic
             c2 += s2; c3 += l3(model.l3_input(s1, s2), learning=False)
         patches = torch.stack([img[:, (q // l2.side) * o:(q // l2.side) * o + c, (q % l2.side) * o:(q % l2.side) * o + c]
                                for q in range(l2.P)], dim=1)                       # (B, P2, c, c)
+        k2 += c2.t() @ onehot; k3 += c3.t() @ onehot
         c2 = c2.view(B, l2.P, l2.F)
         s2sum += torch.einsum("bqf,bqij->qfij", c2, patches); n2 += c2.sum(0)
         s3sum += torch.einsum("bn,bij->nij", c3, img); n3 += c3.sum(0)
     sta2 = s2sum / n2.clamp(min=1.0)[..., None, None]; sta3 = s3sum / n3.clamp(min=1.0)[:, None, None]
     return {"sta2": sta2.view(l2.N, c, c).cpu().numpy().astype(np.float32), "sta2_count": n2.view(-1).cpu().numpy(),
-            "sta3": sta3.cpu().numpy().astype(np.float32), "sta3_count": n3.cpu().numpy()}
+            "sta3": sta3.cpu().numpy().astype(np.float32), "sta3_count": n3.cpu().numpy(),
+            "class_counts2": k2.cpu().numpy().astype(np.float32), "class_counts3": k3.cpu().numpy().astype(np.float32)}
+
+
+def class_purity(counts: np.ndarray, total: np.ndarray, min_spikes: int = 10):
+    # NEW (results_for_cnn_replication): median, over neurons with >= min_spikes test spikes, of the share of a neuron's spikes
+    # that come from its top digit (None if no neuron fired that often)
+    act = total >= min_spikes
+    if not act.any(): return None
+    return float(np.median(counts[act].max(1) / np.maximum(counts[act].sum(1), 1)))
 
 
 # =====================================================================================================================
@@ -372,6 +386,8 @@ def train_layer3(model: ThreeLayerNetwork, train_loader: DataLoader, loaders: tu
         "final_l3_spikes_per_presentation": SPP[-1], "final_l3_unmoved_rows": UM[-1],
         "l3_weight_share_l2": share_l2, "l3_weight_share_l2_at_start": (l2.N / (l1.N + l2.N)) if model.skip else None,
         "l2_never_fired_on_test": int((sta["sta2_count"] == 0).sum()), "l3_never_fired_on_test": int((sta["sta3_count"] == 0).sum()),
+        "l2_class_purity_median": class_purity(sta["class_counts2"], sta["sta2_count"]),     # NEW: see class_purity
+        "l3_class_purity_median": class_purity(sta["class_counts3"], sta["sta3_count"]),
         "l1": {"frozen_at": h1["frozen_at"], "converged_at": h1["converged_at"], "minutes": h1["minutes"], "P": l1.P, "F": l1.F, "K": l1.K, "side": l1.side,
                "readout_accuracy_at_freeze": h1["acc"][-1] if h1["acc"] else None, "readout_accuracy_shifted_at_freeze": h1["acc_shifted"][-1] if h1["acc"] else None},
         "l2": {"frozen_at": h2["frozen_at"], "minutes": h2["minutes"], "P": l2.P, "F": l2.F, "K": l2.K, "side": l2.side, "block": l2.block, "stride": l2.stride,
@@ -442,6 +458,8 @@ def main() -> None:
     p.add_argument("--l3-inhibition", type=float, default=200.0); p.add_argument("--l3-drive", type=float, default=0.36)
     p.add_argument("--l3-lr-mult", type=float, default=10.0); p.add_argument("--l3-no-wta", dest="l3_wta", action="store_false")
     p.add_argument("--l3-skip", action="store_true", help="layer 3 reads layer 1's output as well as layer 2's (a skip connection)")
+    p.add_argument("--l3-k", type=int, default=None, help="k winners per image in layer 3 (multi_layer_unshared's --l2-k rule): the first "
+                   "k neurons to reach threshold share the image, everyone else is silenced. Default: off")
     # run
     p.add_argument("--epochs", type=int, default=6); p.add_argument("--shift", type=int, default=2); p.add_argument("--seed", type=int, default=0)
     p.add_argument("--steps", type=int, default=350); p.add_argument("--snapshot-interval", type=int, default=200)
@@ -484,6 +502,7 @@ def main() -> None:
     l3 = DiehlAndCookNetwork(n_in3, args.l3_neurons, args.l3_theta_plus, args.l3_inhibition, tau_steps(args.l3_theta_tau), None,
                              0.1 * n_in3, 1.0, wta=bool(args.l3_wta))                  # weight scale provisional: set by calibrate_layer3
     l3.lr_plus *= args.l3_lr_mult; l3.lr_minus *= args.l3_lr_mult
+    if args.l3_k: l3.neurons.k_winners = int(args.l3_k)                 # NEW: k winners per image in layer 3
     model = ThreeLayerNetwork(l1, l2, l3, skip=bool(args.l3_skip)).to(device)
 
     run_name = (f"3L_l1p{args.l1_patch}s{args.l1_stride}f{args.l1_features}rd{args.l1_readout_inhibition:g}"
@@ -496,6 +515,7 @@ def main() -> None:
     run_name += f"_l3n{args.l3_neurons}" + ("skip" if args.l3_skip else "")
     if args.l3_drive != 0.36: run_name += f"_l3drv{args.l3_drive:g}"
     if args.l3_lr_mult != 10.0: run_name += f"_l3lr{args.l3_lr_mult:g}"
+    if args.l3_k: run_name += f"_l3k{args.l3_k}"
     run_name += f"_ep{args.epochs}_seed{args.seed}"
     if args.tag: run_name += f"_{args.tag}"
     if args.smoke: run_name += "_SMOKE"

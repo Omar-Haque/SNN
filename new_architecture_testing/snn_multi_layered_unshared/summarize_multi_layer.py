@@ -38,7 +38,7 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--results", default=str(Path(__file__).resolve().parent / "results")); a = ap.parse_args()
     root = Path(a.results); rows = []
     for r in sorted(p.parent for p in root.rglob("run.json")):          # runs may sit in group subfolders (01_batch1_..., etc.)
-        if "SMOKE" in r.name: continue
+        if "SMOKE" in r.name or r.name.startswith("3L_"): continue      # three-layer runs: summarize_three_layer.py
         try: d, cfg = load_run(r)
         except Exception as e: print("skip", r.name, e); continue
         pts, acc = d["points"], d["accuracy"]; sh = d.get("accuracy_shifted", np.full(len(pts), np.nan))

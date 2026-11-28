@@ -1,5 +1,7 @@
 # 03 — batch 3: layer 2 trained on the sparse layer-1 code (submitted from `unity/submit_three_layer.sh`, 2026-11-26)
 
+`unity/submit_three_layer.sh` now holds a later batch; this batch's version: `git show 22255be:unity/submit_three_layer.sh`.
+
 ## Purpose
 Batch 2 (`../02_batch2_more_channels_6ep_20261125/`) found one change that stood out: layer 2 **learning on layer 1's
 one-feature-per-window code** (layer 1 at 200 mV during stage A2, `--l1-a2-inhibition 200`) and then being **read out at

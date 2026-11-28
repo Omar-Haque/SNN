@@ -105,7 +105,8 @@ def describe(run: Path, jobs: dict, out_dir: str, logs: dict, live: dict | None 
           + " while layer 2 learned and at " + mv(l1_rd) + " in stage B and for scoring. Layer 2 = "
           + f"{B}×{B}-window blocks ({span}×{span} px) at a stride of {s2} window{'s' if s2 > 1 else ''}, "
           + f"{F2} features per block ({d['l2_neurons']:,} neurons); it learned at {mv(l2_learn)} and was read at {mv(l2_rd)}. "
-          + f"Layer 3 = {d['l3_neurons']} neurons reading " + ("layer 2 **and layer 1** (skip connection)." if skip else "layer 2 only."),
+          + f"Layer 3 = {d['l3_neurons']} neurons reading " + ("layer 2 **and layer 1** (skip connection)" if skip else "layer 2 only")
+          + (f", **{d['l3_k']} winners per image**." if d.get("l3_k") else "."),
           ""]
 
     from_script = bool(info and info.get("job") in jobs and Path(out_dir).name == run.parent.name)
@@ -136,7 +137,11 @@ def describe(run: Path, jobs: dict, out_dir: str, logs: dict, live: dict | None 
           f"| inhibition afterwards | {mv(l1_a2)} while layer 2 learns (stage A2); {mv(l1_rd)} in stage B and scoring "
           f"| {mv(l2_rd)} in stage B and scoring | – |",
           f"| tie-break (`wta`: same-step winners → only the strongest fires) | {onoff(d['l1_wta'])} | {onoff(d['l2_wta'])} "
-          f"| {onoff(d['l3_wta'])} |",
+          f"| {onoff(d['l3_wta'])}" + (" (replaced by the k-winner rule)" if d.get("l3_k") else "") + " |",
+          f"| winners per image | one per window at {mv(l1_learn)}, runner-ups too at lower inhibition | one per block at {mv(l2_learn)}, "
+          f"runner-ups too at lower inhibition | " + (f"k = {d['l3_k']}: the first {d['l3_k']} neurons to reach threshold share the image "
+          f"(no inhibition among them, none until there are {d['l3_k']}); the rest are silenced" if d.get("l3_k") else
+          "the usual Diehl & Cook competition: the winner's spikes inhibit all others") + " |",
           f"| adaptive threshold: θ+ (θ rises θ+/16 mV per spike), decay | {d['l1_theta_plus']:g}, {tau(d['l1_theta_tau'])} "
           f"| {d['l2_theta_plus']:g}, {tau(d['l2_theta_tau'])} | {d['l3_theta_plus']:g}, {tau(d['l3_theta_tau'])} |",
           f"| weight scale | row sum {d['l1_norm']:g} (mean {d['l1_norm'] / d['l1_patch'] ** 2:.3f}), w_max {d['l1_wmax']:g} "
@@ -184,6 +189,10 @@ def describe(run: Path, jobs: dict, out_dir: str, logs: dict, live: dict | None 
     if d.get("l2_never_fired_on_test") is not None:
         L += [f"- Never fired on the 1,000 test digits: {d['l2_never_fired_on_test']:,} of {d['l2_neurons']:,} layer-2 neurons, "
               f"{d.get('l3_never_fired_on_test', '?')} of {d['l3_neurons']} layer-3 neurons"]
+    if d.get("l2_class_purity_median") is not None or d.get("l3_class_purity_median") is not None:
+        f2 = lambda x: "n/a" if x is None else f"{x:.2f}"
+        L += [f"- Median class purity on the test digits (share of a neuron's spikes from its top digit: ~1 = one-digit prototype): "
+              f"layer 2 {f2(d.get('l2_class_purity_median'))}, layer 3 {f2(d.get('l3_class_purity_median'))}"]
     if skip and d.get("l3_weight_share_l2") is not None:
         L += [f"- Layer 3's weight on layer-2 lines: {100 * d['l3_weight_share_l2_at_start']:.0f} % at the start → "
               f"{100 * d['l3_weight_share_l2']:.0f} % at the end (it follows layer 2's share of the input spikes; see batch 3's README)"]

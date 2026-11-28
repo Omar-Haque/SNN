@@ -101,6 +101,13 @@ def describe(run: Path, jobs: dict, out_dir: str, logs: dict, live: dict | None 
                f"until there are {k2}); every other neuron is silenced" if k2 else
                "the usual Diehl & Cook competition: the winner's spikes inhibit all others"
                + (" (and at most one spike per millisecond, tie-break)" if d.get("l2_wta") else ""))
+    if d.get("l2_explain"):
+        winners += ("; **explaining away**: each winner claims the input lines its template covers, other neurons only receive "
+                    "unclaimed input, and each winner learns from what the other winners leave")
+    if d.get("l2_lat_lr"):
+        winners += (f"; **learned lateral inhibition**: starts at {mv(l2_inh)}, grows by {d['l2_lat_lr']:g} mV × the fraction of images "
+                    f"on which two neurons both fired (minus {d.get('l2_lat_target', 0.0125):g}²) after every batch, kept in "
+                    f"0–{d.get('l2_lat_max', 200):g} mV")
 
     L = [MARK, f"# {run.name}", ""]
     info = live if live is not None else logs.get(run.name)
@@ -129,7 +136,9 @@ def describe(run: Path, jobs: dict, out_dir: str, logs: dict, live: dict | None 
               + ("2×2 spike-OR pooling between the layers. " if pool else "")
               + f"Layer 2 = {n2} neurons over all of layer 1, calibrated for {d.get('l2_drive_arg', 1.2):g} mV/ms, "
               f"STDP × {lr2:g}, lateral inhibition {mv(l2_inh)}, "
-              + (f"**{k2} winners per image**." if k2 else f"tie-break {onoff(d.get('l2_wta'))}."), ""]
+              + (f"**{k2} winners per image**" if k2 else f"tie-break {onoff(d.get('l2_wta'))}")
+              + (", **explaining away**" if d.get("l2_explain") else "")
+              + (f", **learned lateral inhibition** (rate {d['l2_lat_lr']:g})" if d.get("l2_lat_lr") else "") + ".", ""]
     else:
         L += [f"**In short:** {n2} neurons reading the 784 pixels directly (the base Diehl & Cook network, row sum "
               f"{d.get('l2_norm', 78.4):g}, w_max {d.get('l2_wmax', 1.0):g}), lateral inhibition {mv(l2_inh)}, "
@@ -228,6 +237,9 @@ def describe(run: Path, jobs: dict, out_dir: str, logs: dict, live: dict | None 
               + (f"median class purity {pur:.2f} (share of a neuron's spikes from its top digit: ~1 = one-digit prototype)" if pur is not None
                  else "class purity n/a")
               + " — F16 shows what each neuron fired for"]
+    if d.get("lat_inh_final_mean") is not None:
+        L += [f"- Learned lateral inhibition at the end: mean {d['lat_inh_final_mean']:.1f} mV between two neurons, "
+              f"{100 * d['lat_inh_final_frac_at_max']:.1f} % of pairs at the ceiling (`inh2` in run.npz)"]
     if d.get("spikes_per_presentation") is not None:
         L += [f"- Output-layer spikes per image: {d['spikes_per_presentation']:.1f}"]
     if "minutes" in d:

@@ -26,13 +26,16 @@ def label(c):
     if c.get("l2_theta_plus", 0.1) != 0.1: lab += f" θ+{c['l2_theta_plus']:g}"
     if c.get("l1_a2_inhibition") is not None: lab += f" A2@{c['l1_a2_inhibition']:g}mV"
     if c.get("l3_skip"): lab += " +skip"
+    if c.get("l3_k"): lab += f" L3 k{c['l3_k']}"
     if c.get("l1_stride", 2) != 2 or c.get("l1_readout_inhibition", 8.0) != 8.0: lab += f" | L1 s{c['l1_stride']} rd{c['l1_readout_inhibition']:g}"
     if c.get("l3_drive", 0.36) != 0.36 or c.get("l3_lr_mult", 10.0) != 10.0: lab += f" | L3 drv{c['l3_drive']:g} lr×{c['l3_lr_mult']:g}"
     return lab
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--results", default=str(Path(__file__).resolve().parent / "results")); a = ap.parse_args()
+    ap = argparse.ArgumentParser(); ap.add_argument("--results", default=str(Path(__file__).resolve().parent / "results"))
+    # --prefix: put in front of the output names, e.g. "three_layer_" where two-layer runs share the folder (results_for_cnn_replication)
+    ap.add_argument("--prefix", default=""); a = ap.parse_args(); prefix = a.prefix
     root = Path(a.results); rows = []; curves = []
     for r in sorted(p.parent for p in root.rglob("run.json")):
         c = json.loads((r / "run.json").read_text())
@@ -48,11 +51,12 @@ def main():
                      "l2_input_per_ms_active_block": c.get("l2_input_rate_per_ms_active_block"), "l3_input_per_ms": c.get("l3_input_rate_per_ms"),
                      "l3_spikes_per_presentation": c.get("final_l3_spikes_per_presentation"),
                      "l3_weight_share_l2": c.get("l3_weight_share_l2"), "l3_weight_share_l2_at_start": c.get("l3_weight_share_l2_at_start"),
+                     "l2_class_purity": c.get("l2_class_purity_median"), "l3_class_purity": c.get("l3_class_purity_median"),
                      "minutes": c["minutes"]})
         z = np.load(r / "run.npz"); curves.append((label(c) + f" seed {c['seed']}", z["points"], z["accuracy"], z["accuracy_shifted"]))
     if not rows:
         print("no finished runs under", root); return
-    with open(root / "summary.csv", "w", newline="") as f:
+    with open(root / f"{prefix}summary.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
     print(f"{'variant':44s} {'seed':>4s} {'L1':>5s} {'L2':>5s} {'final':>6s} {'last3':>6s} {'shift':>6s} {'gap':>5s} {'min':>5s}")
     for r in rows:
@@ -67,8 +71,8 @@ def main():
         a.set_title(ttl, loc="left", fontweight="bold"); a.set_xlabel("layer-3 training images"); a.grid(True, ls="--", alpha=0.5)
     ax.axhline(85.6, color="gray", ls=":", lw=1, label="single layer, epochs 4–6 (85.6)"); bx.axhline(60.6, color="gray", ls=":", lw=1, label="single layer (60.6)")
     ax.set_ylabel("Accuracy (%)"); ax.legend(fontsize=7, loc="lower right"); bx.legend(fontsize=7, loc="lower right")
-    fig.tight_layout(); fig.savefig(root / "S1_accuracy_overlay.png", dpi=150); plt.close(fig)
-    print("wrote", root / "summary.csv", "and S1_accuracy_overlay.png")
+    fig.tight_layout(); fig.savefig(root / f"{prefix}S1_accuracy_overlay.png", dpi=150); plt.close(fig)
+    print("wrote", root / f"{prefix}summary.csv", f"and {prefix}S1_accuracy_overlay.png")
 
 
 if __name__ == "__main__":
