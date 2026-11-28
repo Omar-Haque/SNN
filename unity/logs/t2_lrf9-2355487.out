@@ -1,0 +1,141 @@
+No conda package cache directories found outside your home directory. To
+prevent conda from filling up your home directory, you can create a new
+directory at `/work/pi_<your_pi_name>/$USER/.conda/pkgs` and reload the module. 
+No conda environment directories found outside your home directory. To prevent
+conda from filling up your home directory, you can create a new directory at
+`/work/pi_<your_pi_name>/$USER/.conda/envs` and reload the module. 
+Loading conda version miniforge3-24.7.1
+node gypsum-gpu013 | gpu: Tesla M40 24GB, 580.178.04 | start Sat Nov 28 01:52:56 PM UTC 2026
+Using CUDA.
+config: {"l1_patch": 7, "l1_stride": 2, "l1_features": 16, "l1_theta_plus": 0.1, "l1_theta_tau": 2000.0, "l1_norm": 12.0, "l1_wmax": 1.5, "l1_inhibition": 200.0, "l1_readout_inhibition": 8.0, "l1_a2_inhibition": 200.0, "l1_examples": 30000, "l1_snapshot": 20, "l1_stop_stationary": true, "l1_wta": true, "l2_block": 9, "l2_stride": 1, "l2_features": 48, "l2_theta_plus": 0.1, "l2_theta_tau": 2000.0, "l2_drive_mult": 1.0, "l2_lr_mult": 1.0, "l2_inhibition": 200.0, "l2_readout_inhibition": 4.0, "l2_examples": 60000, "l2_snapshot": 20, "l2_stop_stationary": true, "l2_wta": true, "l3_neurons": 400, "l3_theta_plus": 0.5, "l3_theta_tau": 30000.0, "l3_inhibition": 200.0, "l3_drive": 0.36, "l3_lr_mult": 10.0, "l3_wta": true, "l3_skip": false, "l3_k": null, "epochs": 6, "shift": 2, "seed": 0, "steps": 350, "snapshot_interval": 200, "tag": "", "smoke": false, "results_dir": "../new_architecture_testing/snn_multi_layered_unshared/results_for_cnn_replication/02_batch2_parts_and_k_6ep_20261128", "device": "auto", "run_name": "3L_l1p7s2f16rd8a2inh200_l2b9s1f48_l2rd4_l3n400_ep6_seed0_20261128-135305", "num_epochs": 6, "num_steps": 350, "batch_size": 32, "l1_side": 11, "l1_neurons": 1936, "l2_side": 3, "l2_neurons": 432, "l2_inputs": 1296, "l3_inputs": 432}
+[layer 1]     32 ex | layer 1 as the output layer: held-out accuracy  52.1% (shifted  33.6%), 1810/1936 neurons labelled
+[layer 1]    640 ex | unstructured templates 1509/1936 | structure med 0.10 | θ med  -51.3 p90  -48.9 | windows fired   81% latency  54.3 ms | per active window:  8.8 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 1.39 |  0.3 min
+[layer 1]   1280 ex | unstructured templates 1120/1936 | structure med 0.23 | θ med  -50.7 p90  -46.9 | windows fired   82% latency  53.6 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.82 |  0.4 min
+[layer 1]   1920 ex | unstructured templates 946/1936 | structure med 0.43 | θ med  -50.2 p90  -45.6 | windows fired   83% latency  54.0 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.78 |  0.6 min
+[layer 1]   2560 ex | unstructured templates 848/1936 | structure med 0.60 | θ med  -49.6 p90  -44.7 | windows fired   83% latency  53.2 ms | per active window:  8.7 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.59 |  0.8 min
+[layer 1]   3200 ex | unstructured templates 775/1936 | structure med 0.69 | θ med  -49.2 p90  -44.1 | windows fired   84% latency  53.2 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.47 |  1.0 min
+[layer 1]   3840 ex | unstructured templates 727/1936 | structure med 0.73 | θ med  -48.8 p90  -43.6 | windows fired   83% latency  53.2 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.43 |  1.2 min
+[layer 1]   4480 ex | unstructured templates 699/1936 | structure med 0.74 | θ med  -48.5 p90  -43.5 | windows fired   83% latency  53.3 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.45 |  1.4 min
+[layer 1]   5120 ex | unstructured templates 674/1936 | structure med 0.75 | θ med  -48.1 p90  -43.3 | windows fired   84% latency  53.3 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.29 |  1.5 min
+[layer 1]   5760 ex | unstructured templates 648/1936 | structure med 0.76 | θ med  -48.0 p90  -43.2 | windows fired   84% latency  52.8 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.29 |  1.7 min
+[layer 1]   6400 ex | unstructured templates 633/1936 | structure med 0.76 | θ med  -47.8 p90  -43.1 | windows fired   84% latency  53.3 ms | per active window:  8.5 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.24 |  1.9 min
+[layer 1]   6400 ex | layer 1 as the output layer: held-out accuracy  67.6% (shifted  47.1%), 1630/1936 neurons labelled
+[layer 1]   7040 ex | unstructured templates 616/1936 | structure med 0.77 | θ med  -47.7 p90  -42.9 | windows fired   84% latency  52.1 ms | per active window:  8.7 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.21 |  2.2 min
+[layer 1]   7680 ex | unstructured templates 596/1936 | structure med 0.77 | θ med  -47.6 p90  -43.0 | windows fired   84% latency  53.2 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.23 |  2.3 min
+[layer 1]   8320 ex | unstructured templates 591/1936 | structure med 0.77 | θ med  -47.6 p90  -42.9 | windows fired   84% latency  52.7 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.22 |  2.5 min
+[layer 1]   8960 ex | unstructured templates 574/1936 | structure med 0.78 | θ med  -47.6 p90  -42.9 | windows fired   84% latency  52.4 ms | per active window:  8.7 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.20 |  2.7 min
+[layer 1]   9600 ex | unstructured templates 569/1936 | structure med 0.78 | θ med  -47.5 p90  -42.8 | windows fired   84% latency  51.4 ms | per active window:  8.8 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  2.9 min
+[layer 1]  10240 ex | unstructured templates 566/1936 | structure med 0.78 | θ med  -47.4 p90  -42.9 | windows fired   84% latency  52.5 ms | per active window:  8.6 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.20 |  3.1 min
+[layer 1]  10880 ex | unstructured templates 562/1936 | structure med 0.78 | θ med  -47.4 p90  -42.9 | windows fired   85% latency  52.2 ms | per active window:  8.7 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  3.3 min
+[layer 1]  11520 ex | unstructured templates 561/1936 | structure med 0.78 | θ med  -47.4 p90  -42.9 | windows fired   84% latency  52.2 ms | per active window:  8.7 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.18 |  3.4 min
+[layer 1]  12160 ex | unstructured templates 556/1936 | structure med 0.79 | θ med  -47.3 p90  -42.9 | windows fired   84% latency  51.3 ms | per active window:  8.8 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  3.6 min
+[layer 1]  12800 ex | unstructured templates 553/1936 | structure med 0.79 | θ med  -47.2 p90  -42.8 | windows fired   85% latency  51.1 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.20 |  3.8 min
+[layer 1]  12800 ex | layer 1 as the output layer: held-out accuracy  68.9% (shifted  50.1%), 1585/1936 neurons labelled
+[layer 1]  13440 ex | unstructured templates 548/1936 | structure med 0.79 | θ med  -47.2 p90  -42.9 | windows fired   85% latency  51.7 ms | per active window:  8.8 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.18 |  4.1 min
+[layer 1]  14080 ex | unstructured templates 546/1936 | structure med 0.79 | θ med  -47.2 p90  -42.8 | windows fired   85% latency  51.8 ms | per active window:  8.8 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.17 |  4.3 min
+[layer 1]  14720 ex | unstructured templates 537/1936 | structure med 0.79 | θ med  -47.1 p90  -42.9 | windows fired   85% latency  51.0 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.22 |  4.4 min
+[layer 1]  15360 ex | unstructured templates 533/1936 | structure med 0.79 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  50.8 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.17 |  4.6 min
+[layer 1]  16000 ex | unstructured templates 530/1936 | structure med 0.79 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  51.4 ms | per active window:  8.8 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.20 |  4.8 min
+[layer 1]  16640 ex | unstructured templates 528/1936 | structure med 0.79 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  51.2 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.23 |  5.0 min
+[layer 1]  17280 ex | unstructured templates 527/1936 | structure med 0.80 | θ med  -47.2 p90  -42.9 | windows fired   84% latency  51.1 ms | per active window:  8.8 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.21 |  5.2 min
+[layer 1]  17920 ex | unstructured templates 525/1936 | structure med 0.79 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  50.9 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  5.4 min
+[layer 1]  18560 ex | unstructured templates 521/1936 | structure med 0.79 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  51.2 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.23 |  5.5 min
+[layer 1]  19200 ex | unstructured templates 516/1936 | structure med 0.80 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  50.8 ms | per active window:  9.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  5.7 min
+[layer 1]  19200 ex | layer 1 as the output layer: held-out accuracy  68.1% (shifted  48.6%), 1560/1936 neurons labelled
+[layer 1]  19840 ex | unstructured templates 510/1936 | structure med 0.80 | θ med  -47.1 p90  -42.9 | windows fired   85% latency  51.0 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  6.0 min
+[layer 1]  20480 ex | unstructured templates 509/1936 | structure med 0.80 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  51.0 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.18 |  6.2 min
+[layer 1]  21120 ex | unstructured templates 508/1936 | structure med 0.80 | θ med  -47.1 p90  -42.9 | windows fired   85% latency  51.0 ms | per active window:  8.8 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.17 |  6.3 min
+[layer 1]  21760 ex | unstructured templates 507/1936 | structure med 0.79 | θ med  -47.2 p90  -42.9 | windows fired   85% latency  51.4 ms | per active window:  8.8 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.20 |  6.5 min
+[layer 1]  22400 ex | unstructured templates 505/1936 | structure med 0.80 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  50.3 ms | per active window:  9.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  6.7 min
+[layer 1]  23040 ex | unstructured templates 504/1936 | structure med 0.80 | θ med  -47.1 p90  -42.9 | windows fired   85% latency  51.1 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.21 |  6.9 min
+[layer 1]  23680 ex | unstructured templates 501/1936 | structure med 0.80 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  50.7 ms | per active window:  9.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.24 |  7.1 min
+[layer 1]  24320 ex | unstructured templates 500/1936 | structure med 0.80 | θ med  -47.2 p90  -42.9 | windows fired   85% latency  50.4 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.21 |  7.3 min
+[layer 1]  24960 ex | unstructured templates 499/1936 | structure med 0.80 | θ med  -47.2 p90  -42.9 | windows fired   85% latency  50.5 ms | per active window:  9.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.21 |  7.4 min
+[layer 1]  25600 ex | unstructured templates 498/1936 | structure med 0.80 | θ med  -47.2 p90  -42.8 | windows fired   85% latency  50.8 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  7.6 min
+[layer 1]  25600 ex | layer 1 as the output layer: held-out accuracy  68.1% (shifted  48.1%), 1553/1936 neurons labelled
+[layer 1]  26240 ex | unstructured templates 497/1936 | structure med 0.80 | θ med  -47.2 p90  -42.9 | windows fired   85% latency  51.0 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.18 |  7.9 min
+[layer 1]  26880 ex | unstructured templates 493/1936 | structure med 0.80 | θ med  -47.1 p90  -43.0 | windows fired   85% latency  50.8 ms | per active window:  9.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.19 |  8.1 min
+[layer 1]  27520 ex | unstructured templates 490/1936 | structure med 0.80 | θ med  -47.1 p90  -42.9 | windows fired   85% latency  50.5 ms | per active window:  9.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.18 |  8.2 min
+[layer 1]  28160 ex | unstructured templates 488/1936 | structure med 0.80 | θ med  -47.1 p90  -42.8 | windows fired   85% latency  50.4 ms | per active window:  9.0 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.16 |  8.4 min
+[layer 1]  28800 ex | unstructured templates 487/1936 | structure med 0.80 | θ med  -47.1 p90  -43.0 | windows fired   85% latency  50.6 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.21 |  8.6 min
+[layer 1]  29440 ex | unstructured templates 487/1936 | structure med 0.80 | θ med  -47.1 p90  -42.9 | windows fired   85% latency  50.8 ms | per active window:  8.9 spikes from  1.0 features,  1.0 in its first spiking ms | ‖ΔW‖ max 0.17 |  8.8 min
+[layer 1]  30016 ex | layer 1 as the output layer: held-out accuracy  67.2% (shifted  49.3%), 1563/1936 neurons labelled
+[layer 1] frozen at 30016 examples; inhibition 200 mV while layer 2 learns (was 200 while layer 1 learned)
+[calibration L2] layer-1 windows with ink started at 1.26 pixel spikes/ms x mean weight 0.245 = 0.31 mV/ms; an active layer-2 block receives 1.609 layer-1 spikes/ms -> mean weight 0.192 (row sum 249.5, w_max 1.18) for 0.31 mV/ms
+[layer 2]     32 ex | layer 2 as the output layer: held-out accuracy  36.2% (shifted  25.2%), 432/432 neurons labelled
+[layer 2]    640 ex | templates still at their initial weights  432/432 | θ med  -51.5 p90  -51.2 | blocks with input that fired   99% latency  68.0 ms | per active block:  7.2 spikes from  1.0 features,  1.0 in its first spiking ms |  0.4 min
+[layer 2]   1280 ex | templates still at their initial weights  432/432 | θ med  -51.2 p90  -50.8 | blocks with input that fired  100% latency  69.5 ms | per active block:  6.9 spikes from  1.0 features,  1.0 in its first spiking ms |  0.7 min
+[layer 2]   1920 ex | templates still at their initial weights  432/432 | θ med  -50.9 p90  -50.5 | blocks with input that fired   99% latency  69.8 ms | per active block:  6.9 spikes from  1.0 features,  1.0 in its first spiking ms |  1.0 min
+[layer 2]   2560 ex | templates still at their initial weights  432/432 | θ med  -50.7 p90  -50.4 | blocks with input that fired   99% latency  70.8 ms | per active block:  6.8 spikes from  1.0 features,  1.0 in its first spiking ms |  1.2 min
+[layer 2]   3200 ex | templates still at their initial weights  432/432 | θ med  -50.6 p90  -50.2 | blocks with input that fired  100% latency  74.0 ms | per active block:  6.5 spikes from  1.0 features,  1.0 in its first spiking ms |  1.5 min
+[layer 2]   3840 ex | templates still at their initial weights  432/432 | θ med  -50.6 p90  -50.1 | blocks with input that fired   99% latency  72.3 ms | per active block:  6.6 spikes from  1.0 features,  1.0 in its first spiking ms |  1.8 min
+[layer 2]   4480 ex | templates still at their initial weights  432/432 | θ med  -50.5 p90  -50.0 | blocks with input that fired   99% latency  71.5 ms | per active block:  6.6 spikes from  1.0 features,  1.0 in its first spiking ms |  2.1 min
+[layer 2]   5120 ex | templates still at their initial weights  432/432 | θ med  -50.5 p90  -49.9 | blocks with input that fired  100% latency  72.7 ms | per active block:  6.6 spikes from  1.0 features,  1.0 in its first spiking ms |  2.4 min
+[layer 2]   5760 ex | templates still at their initial weights  432/432 | θ med  -50.5 p90  -49.9 | blocks with input that fired  100% latency  72.8 ms | per active block:  6.5 spikes from  1.0 features,  1.0 in its first spiking ms |  2.7 min
+[layer 2] stationary: no template left its initial weights for 5 snapshots (432 unmoved, mostly blocks that never get input) and the median theta moved < 0.3 mV -> freezing at 5760 examples
+[layer 2]   5760 ex | layer 2 as the output layer: held-out accuracy  62.7% (shifted  40.8%), 432/432 neurons labelled
+[layer 1] readout inhibition 8 mV from here on (stage B and evaluation)
+[layer 2] readout inhibition 4 mV (was 200 while learning)
+[layer 2] frozen at 5760 examples
+[calibration L3] layer 2 -> layer 3: 0.87 spikes/ms per presentation over 432 lines; mean weight 0.415 (row sum 179.4, w_max 4.15) for 0.36 mV/ms
+[layer 3] ep 1 |      32 ex | held-out  25.5% shifted  18.7% | rows at initial weights 400/400 |   8.6 layer-3 spikes per presentation | θ med  -52.0 | 381/400 labelled |   0.1 min
+[layer 3] ep 1 |    6432 ex | held-out  48.6% shifted  27.2% | rows at initial weights 390/400 |   7.0 layer-3 spikes per presentation | θ med  -49.2 | 375/400 labelled |   3.1 min
+[layer 3] ep 1 |   12832 ex | held-out  55.3% shifted  31.1% | rows at initial weights 351/400 |   6.2 layer-3 spikes per presentation | θ med  -47.4 | 371/400 labelled |   6.1 min
+[layer 3] ep 1 |   19232 ex | held-out  58.6% shifted  35.6% | rows at initial weights 292/400 |   5.7 layer-3 spikes per presentation | θ med  -45.9 | 377/400 labelled |   9.0 min
+[layer 3] ep 1 |   25632 ex | held-out  64.1% shifted  35.4% | rows at initial weights 206/400 |   5.6 layer-3 spikes per presentation | θ med  -44.7 | 380/400 labelled |  12.0 min
+[layer 3] ep 1 |   32032 ex | held-out  67.2% shifted  37.5% | rows at initial weights 145/400 |   5.4 layer-3 spikes per presentation | θ med  -43.9 | 380/400 labelled |  14.9 min
+[layer 3] ep 1 |   38432 ex | held-out  63.9% shifted  39.1% | rows at initial weights  91/400 |   5.3 layer-3 spikes per presentation | θ med  -42.9 | 376/400 labelled |  17.9 min
+[layer 3] ep 1 |   44832 ex | held-out  64.8% shifted  40.6% | rows at initial weights  51/400 |   5.3 layer-3 spikes per presentation | θ med  -42.4 | 377/400 labelled |  20.9 min
+[layer 3] ep 1 |   51232 ex | held-out  68.4% shifted  40.7% | rows at initial weights  21/400 |   5.4 layer-3 spikes per presentation | θ med  -42.0 | 371/400 labelled |  23.9 min
+[layer 3] ep 1 |   57632 ex | held-out  67.3% shifted  41.6% | rows at initial weights  12/400 |   5.2 layer-3 spikes per presentation | θ med  -41.5 | 373/400 labelled |  26.8 min
+[layer 3] ep 2 |   64032 ex | held-out  68.6% shifted  40.7% | rows at initial weights   6/400 |   5.4 layer-3 spikes per presentation | θ med  -41.2 | 370/400 labelled |  29.8 min
+[layer 3] ep 2 |   70432 ex | held-out  69.7% shifted  43.7% | rows at initial weights   2/400 |   5.4 layer-3 spikes per presentation | θ med  -41.0 | 372/400 labelled |  32.8 min
+[layer 3] ep 2 |   76832 ex | held-out  69.1% shifted  44.1% | rows at initial weights   2/400 |   5.4 layer-3 spikes per presentation | θ med  -40.6 | 377/400 labelled |  35.7 min
+[layer 3] ep 2 |   83232 ex | held-out  68.7% shifted  45.4% | rows at initial weights   0/400 |   5.4 layer-3 spikes per presentation | θ med  -40.4 | 381/400 labelled |  38.7 min
+[layer 3] ep 2 |   89632 ex | held-out  71.3% shifted  44.9% | rows at initial weights   0/400 |   5.4 layer-3 spikes per presentation | θ med  -40.3 | 383/400 labelled |  41.7 min
+[layer 3] ep 2 |   96032 ex | held-out  73.5% shifted  45.2% | rows at initial weights   0/400 |   5.5 layer-3 spikes per presentation | θ med  -40.2 | 376/400 labelled |  44.6 min
+[layer 3] ep 2 |  102432 ex | held-out  72.1% shifted  46.3% | rows at initial weights   0/400 |   5.5 layer-3 spikes per presentation | θ med  -40.0 | 371/400 labelled |  47.6 min
+[layer 3] ep 2 |  108832 ex | held-out  71.8% shifted  43.4% | rows at initial weights   0/400 |   5.5 layer-3 spikes per presentation | θ med  -39.9 | 373/400 labelled |  50.6 min
+[layer 3] ep 2 |  115232 ex | held-out  72.5% shifted  45.0% | rows at initial weights   0/400 |   5.5 layer-3 spikes per presentation | θ med  -39.8 | 379/400 labelled |  53.6 min
+[layer 3] ep 3 |  121632 ex | held-out  72.9% shifted  46.4% | rows at initial weights   0/400 |   5.5 layer-3 spikes per presentation | θ med  -39.7 | 383/400 labelled |  56.6 min
+[layer 3] ep 3 |  128032 ex | held-out  72.5% shifted  44.3% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.7 | 382/400 labelled |  59.5 min
+[layer 3] ep 3 |  134432 ex | held-out  72.8% shifted  45.1% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.6 | 375/400 labelled |  62.5 min
+[layer 3] ep 3 |  140832 ex | held-out  73.5% shifted  44.7% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.7 | 378/400 labelled |  65.5 min
+[layer 3] ep 3 |  147232 ex | held-out  70.6% shifted  44.9% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.5 | 373/400 labelled |  68.5 min
+[layer 3] ep 3 |  153632 ex | held-out  73.0% shifted  45.8% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.3 | 376/400 labelled |  71.4 min
+[layer 3] ep 3 |  160032 ex | held-out  74.0% shifted  45.4% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.4 | 382/400 labelled |  74.4 min
+[layer 3] ep 3 |  166432 ex | held-out  71.0% shifted  45.5% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.3 | 369/400 labelled |  77.4 min
+[layer 3] ep 3 |  172832 ex | held-out  71.4% shifted  46.3% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.3 | 373/400 labelled |  80.3 min
+[layer 3] ep 3 |  179232 ex | held-out  73.6% shifted  47.5% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.1 | 370/400 labelled |  83.3 min
+[layer 3] ep 4 |  185632 ex | held-out  73.1% shifted  48.3% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.2 | 379/400 labelled |  86.3 min
+[layer 3] ep 4 |  192032 ex | held-out  73.2% shifted  48.2% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.0 | 380/400 labelled |  89.3 min
+[layer 3] ep 4 |  198432 ex | held-out  76.4% shifted  47.9% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.1 | 373/400 labelled |  92.2 min
+[layer 3] ep 4 |  204832 ex | held-out  75.3% shifted  48.3% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.0 | 369/400 labelled |  95.2 min
+[layer 3] ep 4 |  211232 ex | held-out  74.0% shifted  46.9% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 378/400 labelled |  98.2 min
+[layer 3] ep 4 |  217632 ex | held-out  73.8% shifted  46.9% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 374/400 labelled | 101.2 min
+[layer 3] ep 4 |  224032 ex | held-out  72.6% shifted  47.0% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.1 | 376/400 labelled | 104.1 min
+[layer 3] ep 4 |  230432 ex | held-out  75.2% shifted  47.1% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 378/400 labelled | 107.1 min
+[layer 3] ep 4 |  236832 ex | held-out  73.7% shifted  47.3% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 372/400 labelled | 110.1 min
+[layer 3] ep 5 |  243232 ex | held-out  74.1% shifted  48.3% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 382/400 labelled | 113.1 min
+[layer 3] ep 5 |  249632 ex | held-out  74.5% shifted  45.9% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.0 | 381/400 labelled | 116.0 min
+[layer 3] ep 5 |  256032 ex | held-out  72.5% shifted  45.5% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 376/400 labelled | 119.0 min
+[layer 3] ep 5 |  262432 ex | held-out  71.9% shifted  45.6% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 372/400 labelled | 122.0 min
+[layer 3] ep 5 |  268832 ex | held-out  71.9% shifted  45.9% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.0 | 378/400 labelled | 124.9 min
+[layer 3] ep 5 |  275232 ex | held-out  75.4% shifted  47.3% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.1 | 375/400 labelled | 127.9 min
+[layer 3] ep 5 |  281632 ex | held-out  74.0% shifted  45.8% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -38.9 | 385/400 labelled | 130.9 min
+[layer 3] ep 5 |  288032 ex | held-out  74.0% shifted  45.2% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 372/400 labelled | 133.8 min
+[layer 3] ep 5 |  294432 ex | held-out  74.6% shifted  48.5% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.0 | 379/400 labelled | 136.8 min
+[layer 3] ep 6 |  300832 ex | held-out  74.7% shifted  46.2% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.1 | 379/400 labelled | 139.8 min
+[layer 3] ep 6 |  307232 ex | held-out  73.9% shifted  46.2% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.0 | 377/400 labelled | 142.8 min
+[layer 3] ep 6 |  313632 ex | held-out  75.4% shifted  47.4% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 381/400 labelled | 145.8 min
+[layer 3] ep 6 |  320032 ex | held-out  76.3% shifted  47.5% | rows at initial weights   0/400 |   5.6 layer-3 spikes per presentation | θ med  -39.0 | 376/400 labelled | 148.7 min
+[layer 3] ep 6 |  326432 ex | held-out  73.9% shifted  47.6% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.1 | 377/400 labelled | 151.7 min
+[layer 3] ep 6 |  332832 ex | held-out  73.5% shifted  46.7% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 372/400 labelled | 154.7 min
+[layer 3] ep 6 |  339232 ex | held-out  75.2% shifted  47.3% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 377/400 labelled | 157.7 min
+[layer 3] ep 6 |  345632 ex | held-out  76.2% shifted  48.3% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.0 | 374/400 labelled | 160.7 min
+[layer 3] ep 6 |  352032 ex | held-out  75.4% shifted  47.9% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.1 | 376/400 labelled | 163.7 min
+[layer 3] ep 6 |  358432 ex | held-out  75.4% shifted  46.5% | rows at initial weights   0/400 |   5.7 layer-3 spikes per presentation | θ med  -39.1 | 374/400 labelled | 166.7 min
+Training complete
+
+run finished in 179.3 min | final acc 75.7% shifted 47.6% | last-3-epochs average 74.3% / 47.1% | /home/csigrist_umass_edu/SNN/three_layer_architecture/../new_architecture_testing/snn_multi_layered_unshared/results_for_cnn_replication/02_batch2_parts_and_k_6ep_20261128/3L_l1p7s2f16rd8a2inh200_l2b9s1f48_l2rd4_l3n400_ep6_seed0_20261128-135305
+end Sat Nov 28 04:52:33 PM UTC 2026
